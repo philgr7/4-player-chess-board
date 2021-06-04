@@ -1,3 +1,3 @@
 # 4-player-chess-board
 
-An attempt to make a playable 4 player chess board from scratch.
+A basic playable 4 player chess board built from scratch (only using basic packages like numpy/matplotlib.pyplot)
