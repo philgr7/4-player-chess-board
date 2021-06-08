@@ -56,10 +56,11 @@ class Board:
         self.image = image
         self.squares = squares
         #Initialise data for all pieces on board - assumed default piece
-        #config if not stated otherwise
+        #config if not stated otherwise which is defined 
     def piece_init(self, piece_order = ['Rook', 'Knight', 'Bishop',
         'King', 'Queen', 'Bishop', 'Knight', 'Rook']):
         pieces = []
+            #Loop initialises based on default piece locations
         for i in range(8):
             self.squares[1][10-i].add_piece(Piece('Pawn', 'Red'))
             self.squares[10-i][1].add_piece(Piece('Pawn', 'Blue'))
@@ -112,6 +113,7 @@ class Board:
         self.ax = ax
         self.fig = fig
 
+    #Finds square object based on board co-ords
     def square_find(self, square_code):
         file_, rank = move_to_rank_file(square_code)
         return self.squares[rank-1][file_-1]
@@ -121,9 +123,12 @@ class Board:
     def move(self, move_start, move_end):
         piece_start = self.square_find(move_start).piece
 
+        #Checks if piece in start square
         if piece_start == None:
             return print('No piece in start square')
 
+        #Based on move order sets what colour should be moving and what
+        #move number has been reached
         if self.move_list == []:
             move_number = 1
             colour = colour_list[0]
@@ -137,17 +142,18 @@ class Board:
 
         attempt_move = Move(move_number, colour, move_start, move_end)
 
+        #If rules turned on, checks if legal move has been made
         if self.rules == True:
             move_check = self.legal_check(attempt_move, piece_start)
         else:
             move_check = True
 
-        file_start, rank_start = move_to_rank_file(move_start)
-        file_end, rank_end = move_to_rank_file(move_end)
-
+        #Carries out move and updates square objects, appending new move to
+        #list
         if move_check == True:
-            self.squares[rank_end-1][file_end-1].add_piece(piece_start)
-            self.squares[rank_start-1][file_start-1].remove_piece()
+            self.square_find(move_end).add_piece(piece_start)
+            self.square_find(move_end).piece.moved = True
+            self.square_find(move_start).remove_piece()
             self.move_list.append(attempt_move)
             
         else:
@@ -166,7 +172,7 @@ class Board:
         if move.colour != piece.colour:
             return False
 
-        #Tests for obstructions and whether piece has capability
+        #Tests check for obstructions and whether piece has capability
         #to move between designated squares
 
         #Rook move horizontally or vertically
@@ -182,62 +188,15 @@ class Board:
         elif piece.name == 'Bishop':
             return self.diag_test(move)
 
-        #Pawn moves forwards 1 square or can capture diagonally 1 square or
-        #can enpassant
-        elif piece.name == 'Pawn':
-            direct = piece.direction
-            piece_check = self.square_find(move.end).piece
-            print(direct, piece_check, move.r_diff(), move.f_diff())
-            if direct == 1 and move.r_diff() == 1:
-                if abs(move.f_diff()) == 1:
-                    if piece_check != None:
-                        return True
-                elif move.f_diff() == 0:
-                    if piece_check == None:
-                        return True
-
-            if direct == 2 and move.f_diff() == 1:
-                if abs(move.r_diff()) == 1:
-                    if piece_check != None:
-                        return True
-                elif move.r_diff() == 0:
-                    if piece_check == None:
-                        return True
-
-            if direct == 3 and move.r_diff() == -1:
-                if abs(move.f_diff()) == 1:
-                    if piece_check != None:
-                        return True
-                elif move.f_diff() == 0:
-                    if piece_check == None:
-                        return True
-
-            if direct == 4 and move.f_diff() == -1:
-                if abs(move.r_diff()) == 1:
-                    if piece_check != None:
-                        return True
-                elif move.r_diff() == 0:
-                    if piece_check == None:
-                        return True
-            return False
-
-
         #King can move 1 square in any direction (assuming not in check)
         elif piece.name == 'King':
-            if abs(move.f_diff()) <= 1 and abs(move.r_diff()) <= 1:
-                return True
-            else: 
-                return False
+            return self.king_test(move)
 
         elif piece.name == 'Knight':
-            min_diff = abs(min(move.f_diff()), abs(move.r_diff()))
-            max_diff = abs(max(move.f_diff()), abs(move.r_diff()))
-            if max_diff == 2 and min_diff == 1:
-                return True
-            else:
-                return False
-        return True           
+            return self.knight_test(move)
 
+        elif piece.name == 'Pawn':
+            return self.pawn_test(move, piece)
 
     #Test movement along horizontal lines
     def hori_test(self, move):
@@ -245,17 +204,18 @@ class Board:
         if move.f_start == move.f_end or move.r_start != move.r_end:
             return False
             
+        #index in python starts at 0, file/rank at 1, don't want to include
+        #start square so range_start unchanged from min
         range_start = min(move.f_start, move.f_end)
         range_end = max(move.f_start, move.f_end) - 1
 
-        #Check if square on path is blocked or contains a piece
+        #Check for obstruction on path
         for i in range(range_start, range_end):
             if self.squares[move.r_start-1][i].obstruct() == True:
                 return False
-        
         return True
 
-
+    #Test movement along vertical lines
     def verti_test(self, move):
         if move.r_start == move.r_end or move.f_start != move.f_end:
             return False
@@ -263,26 +223,34 @@ class Board:
         range_start = min(move.r_start, move.r_end)
         range_end = max(move.r_start, move.r_end) - 1
 
-        #Check if square on path is blocked or contains a piece
         for i in range(range_start, range_end):
             if self.squares[i][move.f_start-1].obstruct() == True:
                 return False
-        
         return True
 
+    #Tests for movement along diagonal lines
     def diag_test(self, move):
-        if (((move.r_start + move.f_start) != (move.r_end + move.f_end)) and
-        ((move.r_start - move.f_start) != (move.r_end - move.f_end))):
+
+        #Either sum or difference of rank/file is constant along a diagonal
+
+        sum_equal = (move.r_start + move.f_start) == (move.r_end + move.f_end)
+        diff_equal = (move.r_start - move.f_start) == (move.r_end - move.f_end)
+
+        if sum_equal == False and diff_equal == False:
             return False
+
         min_r = min(move.r_start, move.r_end) - 1
         diff = abs(move.r_diff())
 
-        if (move.r_start + move.f_start) == (move.r_end + move.f_end):
+        #If sum equal then rank/file increase in opposite direction
+        if sum_equal == True:
             f_loop = max(move.f_start, move.f_end) - 1
             for i in range(1, diff):
                 if self.squares[min_r+i][f_loop-i].obstruct() == True:
                     return False
-        else:
+
+        #if difference equal then rank/file increase in same direction
+        elif diff_equal == True:
             f_loop = min(move.f_start, move.f_end) - 1
             for i in range(1, diff):
                 if self.squares[min_r+i][f_loop+i].obstruct() == True:
@@ -290,19 +258,71 @@ class Board:
 
         return True
 
+    def knight_test(self, move):
+
+        #If rank/file change by 1/2 in any order than move is legal
+        min_diff = min(abs(move.f_diff()), abs(move.r_diff()))
+        max_diff = max(abs(move.f_diff()), abs(move.r_diff()))
+        if max_diff == 2 and min_diff == 1:
+            return True
+        else:
+            return False
+
+    def king_test(self, move):
+        #Moves by 1 in any direction
+        if abs(move.f_diff()) <= 1 and abs(move.r_diff()) <= 1:
+            return True
+        else: 
+            return False
+
+    def pawn_test(self, move, piece):
+        #Based on direction pawn is facing, defines rotation vectors that
+        #allow for testing if move is valid
+        direct = piece.direction
+        theta = np.radians(90*direct)
+        c, s = round(np.cos(theta)), round(np.sin(theta))
+
+        #Arrays cover moving forward and capturing on either diagonal
+        diff_arr = np.array([c,s])
+        diff_diag_1 = np.array([c-s, s-c])
+        diff_diag_2 = np.array([c+s, s+c])
+
+        piece_check = self.square_find(move.end).piece
+        moved_check = piece.moved
+
+        #Compares allowed moves for pawn in certain direction with 
+        #attempted move for cases of moving 1 or 2 squares forward or capture
+        rf_diff = [move.r_diff(), move.f_diff()]
+    
+        m1_check = np.array_equal(rf_diff, diff_arr)
+        m2_check = np.array_equal(rf_diff, 2*diff_arr)
+        diag_check = (np.array_equal(rf_diff, diff_diag_1) or
+                    np.array_equal(rf_diff, diff_diag_2))
+
+        #If no piece present then check if can move 1 or 2 squares
+        if piece_check == None:
+            if m1_check == True:
+                return True
+            elif m2_check == True and moved_check == False:
+                return True
+        #If piece present then check if diagonal capture is possible
+        elif piece_check != None:
+            if diag_check == True:
+                return True
+        return False
+
 #Creates class for a chess piece
 class Piece:
 
-    def __init__(self, name, colour):
+    def __init__(self, name, colour, moved = False, last_move = 0):
         self.name = name
         self.colour = colour
         self.value = piece_list[name]['value']
-        if self.name == 'Pawn':
-            self.direction = colour_list.index(colour) + 1
+        self.moved = moved
+        self.last_move = last_move
 
-    #Returns string of position of piece
-    def position(self):
-        return self.file_ + self.rank
+        if self.name == 'Pawn':
+            self.direction = colour_list.index(colour)
 
 class Square:
     def __init__(self, rank, file_, blocked = False):
