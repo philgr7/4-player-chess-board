@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import string
+import tkinter as tk
+import time
 
 #Colours available in four player chess
 colour_list = ('Red', 'Blue', 'Yellow', 'Green')
@@ -29,32 +31,24 @@ class Board:
         self.rules = rules
         self.move_list = []
 
-        self.base_board()
+        self.board_init()
         self.piece_init()
-        self.display(init = True)
 
-    #Creates empty board and initialises squares
-    def base_board(self):
-        #Initialise matrix of grid to be encoded with rgb colour code
-        image = np.zeros((self.nrows, self.ncols, 3))
+    #Squares initialised to position on board
+    def board_init(self):
+        
         squares = np.empty((self.nrows, self.ncols), dtype = 'object')
 
-        #White squares are white, black squares are grey and corner 
-        #squares that are not part of the board are black
         for i in range(self.nrows):
             for j in range(self.ncols):
-                if (i + j)%2 == 0: 
-                    image[i][j] = np.array([1, 1, 1])
-                else:
-                    image[i][j] = np.array([0.5, 0.5, 0.5])
                 if ((i < self.corner or i >= self.nrows - self.corner) 
                     and (j < self.corner or j >= self.ncols - self.corner)):
-                    image[i][j] = np.array([0, 0, 0])
                     squares[i][j] = Square(i+1, j+1, blocked = True)
                 else:
                     squares[i][j] = Square(i+1, j+1)
-        self.image = image
+        
         self.squares = squares
+        
         #Initialise data for all pieces on board - assumed default piece
         #config if not stated otherwise which is defined 
     def piece_init(self, piece_order = ['Rook', 'Knight', 'Bishop',
@@ -72,46 +66,6 @@ class Board:
             self.squares[13][3+i].add_piece(Piece(piece_order[i], 'Yellow'))
             self.squares[3+i][13].add_piece(Piece(piece_order[i], 'Green'))
         self.pieces = pieces
-
-    #Outputs image of the current board position including pieces
-    def display(self, init = False):
-        if init == True:
-            fig, ax = plt.subplots(figsize=(cm_to_inch(self.nrows,self.ncols)))
-        else:
-            plt.cla()
-            ax = self.ax
-            fig = self.fig
-        
-        ax.imshow(self.image)
-
-        #Checks if square has piece and if it does then plots it with 
-        #respective symbol
-        for square in self.squares.ravel():
-            if square.piece == None:
-                continue
-            else:
-                piece = square.piece
-
-            ax.text(square.coord_to_position('file', self.nrows),
-                    square.coord_to_position('rank', self.ncols),
-                    piece_list[piece.name]['unicode'], 
-                    fontsize = '20', color = piece.colour, 
-                    transform = ax.transAxes) 
-
-        row_labels = range(self.nrows, 0, -1)
-        col_labels = list(alphabet[:self.ncols])
-        ax.set_xticks(range(self.ncols))
-        ax.set_xticklabels(col_labels)
-        ax.set_yticks(range(self.nrows))
-        ax.set_yticklabels(row_labels)
-        
-        if init == True:
-            plt.show(block = False)
-        else:
-            plt.draw()
-
-        self.ax = ax
-        self.fig = fig
 
     #Finds square object based on board co-ords
     def square_find(self, square_code):
@@ -155,9 +109,10 @@ class Board:
             self.square_find(move_end).piece.moved = True
             self.square_find(move_start).remove_piece()
             self.move_list.append(attempt_move)
-            
+            return True
         else:
             print('Invalid move entered')
+            return False
 
     #Check if legal move is being made
     def legal_check(self, move, piece):
@@ -371,7 +326,139 @@ class Move:
 
     def f_diff(self):
         return self.f_end - self.f_start
-    
+
+class Display(tk.Tk):
+
+    def __init__(self, board = Board()):
+        super().__init__()
+        self.board_height = 500
+        self.board_width = 500
+
+        self.nrows = board.nrows
+        self.ncols = board.ncols
+        self.corner = board.corner
+
+        self.s_width = self.board_width/board.ncols
+        self.s_height = self.board_height/board.nrows
+
+        self.display(board)
+
+    def display(self, board):
+        self.geometry('1000x600')
+        self.canvas = tk.Canvas(self, width=self.board_width, 
+                                height = self.board_height)
+        self.canvas.place(relx=0.5, rely=0.5, anchor = 'center')
+        
+        text_list = []
+        for i in range(self.nrows):
+            for j in range(self.ncols):
+                if (i + j)%2 == 0:
+                    colour = 'white'
+                else:
+                    colour = 'grey'
+                if ((i < self.corner or i >= self.nrows - self.corner) and
+                    (j < self.corner or j >= self.ncols - self.corner)):
+                    colour = 'black'
+
+                self.canvas.create_rectangle(i*self.s_width,
+                        j*self.s_height, (i+1)*self.s_width,
+                        (j+1)*self.s_height, fill = colour)
+        
+        #Checks if square has piece and if it does then plots it with 
+        #respective symbol
+        for square in board.squares.ravel():
+            if square.piece == None:
+                continue
+            else:
+                piece = square.piece
+
+            pos_x = (square.file_ - 0.5) * self.s_height
+            pos_y = (self.nrows + 0.5 - square.rank) * self.s_width
+
+            text = self.canvas.create_text(pos_x, pos_y,
+                text = piece_list[piece.name]['unicode'], 
+                fill = piece.colour, font = (None, 35))
+                
+            text_list.append(text)
+
+        self.text_list = text_list
+
+        self.canvas.bind('<ButtonPress-1>', self.pick_up)
+        self.canvas.bind('<B1-Motion>', self.drag)
+
+        def handler(event, self=self, board=board):
+            return self.drop(event, board)
+        self.canvas.bind('<ButtonRelease-1>', handler) 
+
+    def pick_up(self, event):
+   
+        object_id = self.canvas.find_closest(event.x, event.y, halo=5)[0]
+
+        if object_id in self.text_list:
+            self.drag_piece = object_id
+            self.drag_init_x = event.x
+            self.drag_init_y = event.y
+            self.drag_x = event.x
+            self.drag_y = event.y
+        else:
+            self.drag_piece = None
+
+    def drag(self, event):
+        if self.drag_piece == None:
+            pass
+
+        else:
+            delta_x = event.x - self.drag_x
+            delta_y = event.y - self.drag_y
+
+            self.canvas.move(self.drag_piece, delta_x, delta_y)
+
+            self.drag_x = event.x
+            self.drag_y = event.y
+
+    def drop(self, event, board):
+        if self.drag_piece == None:
+            pass
+        else:
+            index_init_x, index_init_y = self.coords_to_index(
+                    self.drag_init_x, self.drag_init_y)
+            index_x, index_y = self.coords_to_index(event.x, event.y)
+
+            move_start = self.index_to_move(index_init_x, index_init_y)
+            move_end = self.index_to_move(index_x, index_y)
+
+            move_test = board.move(move_start, move_end)
+
+            if move_test:
+                pos_x = (index_x-0.5)*self.s_height
+                pos_y = (index_y-0.5)*self.s_width
+
+                piece_delete = self.canvas.find_closest(pos_x, pos_y)[0]
+
+                if piece_delete == self.drag_piece:
+                    pass
+
+                elif piece_delete in self.text_list:
+                    self.canvas.delete(piece_delete)
+
+            else:
+                pos_x = (index_init_x-0.5)*self.s_height
+                pos_y = (index_init_y-0.5)*self.s_width
+                time.sleep(1)
+
+            self.canvas.coords(self.drag_piece, (pos_x, pos_y))
+
+    def coords_to_index(self, x, y):
+        index_x = np.ceil(x/self.s_width)
+        index_y = np.ceil(y/self.s_height)
+        return index_x, index_y
+
+    def index_to_move(self, index_x, index_y):
+        file_ = round(index_x)
+        rank = round(self.nrows + 1 - index_y)
+        move_code = alphabet[file_-1] + '{}'.format(rank)
+        return move_code
+
 #Converts cm to inches for figure size
 def cm_to_inch(*args):
     inch = 2.54
@@ -383,16 +470,6 @@ def move_to_rank_file(move_name):
     rank_number = int(move_name[1:])
     return file_number, rank_number
 
-test = Board()
+game = Display()
+game.mainloop()
 
-game = True
-
-while game == True:
-    move_start = input("Square to move from: ")
-    if move_start == 'end':
-        break
-    move_end = input("Square to move to: ")
-    if move_end == 'end':
-        break
-    test.move(move_start, move_end)
-    test.display()
