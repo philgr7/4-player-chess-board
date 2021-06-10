@@ -243,7 +243,7 @@ class Board:
         diff_diag_2 = np.array([c+s, s+c])
 
         piece_check = self.square_find(move.end).piece
-        moved_check = piece.moved
+        moved_check = piece.last_move
 
         #Compares allowed moves for pawn in certain direction with 
         #attempted move for cases of moving 1 or 2 squares forward or capture
@@ -269,15 +269,15 @@ class Board:
 #Creates class for a chess piece
 class Piece:
 
-    def __init__(self, name, colour, moved = False, last_move = 0):
+    def __init__(self, name, colour, last_move = False):
         self.name = name
         self.colour = colour
         self.value = piece_list[name]['value']
-        self.moved = moved
         self.last_move = last_move
 
-        if self.name == 'Pawn':
-            self.direction = colour_list.index(colour)
+        self.loc = 0
+
+        self.direction = colour_list.index(colour)
 
 class Square:
     def __init__(self, rank, file_, blocked = False):
@@ -288,6 +288,7 @@ class Square:
         self.blocked = blocked
 
     def add_piece(self, piece):
+        piece.loc = self.name
         self.piece = piece
 
     def remove_piece(self):
@@ -334,30 +335,30 @@ class Display(tk.Tk):
         self.board_height = 500
         self.board_width = 500
 
-        self.nrows = board.nrows
-        self.ncols = board.ncols
-        self.corner = board.corner
+        self.board = board
 
-        self.s_width = self.board_width/board.ncols
-        self.s_height = self.board_height/board.nrows
+        self.s_width = self.board_width/self.board.ncols
+        self.s_height = self.board_height/self.board.nrows
 
-        self.display(board)
+        self.display()
 
-    def display(self, board):
+    def display(self):
         self.geometry('1000x600')
         self.canvas = tk.Canvas(self, width=self.board_width, 
                                 height = self.board_height)
         self.canvas.place(relx=0.5, rely=0.5, anchor = 'center')
         
-        text_list = []
-        for i in range(self.nrows):
-            for j in range(self.ncols):
+        piece_loc = {}
+        for i in range(self.board.nrows):
+            for j in range(self.board.ncols):
                 if (i + j)%2 == 0:
                     colour = 'white'
                 else:
                     colour = 'grey'
-                if ((i < self.corner or i >= self.nrows - self.corner) and
-                    (j < self.corner or j >= self.ncols - self.corner)):
+                if ((i < self.board.corner or 
+                    i >= self.board.nrows - self.board.corner) and
+                    (j < self.board.corner or 
+                    j >= self.board.ncols - self.board.corner)):
                     colour = 'black'
 
                 self.canvas.create_rectangle(i*self.s_width,
@@ -366,38 +367,34 @@ class Display(tk.Tk):
         
         #Checks if square has piece and if it does then plots it with 
         #respective symbol
-        for square in board.squares.ravel():
+        for square in self.board.squares.ravel():
             if square.piece == None:
                 continue
             else:
                 piece = square.piece
 
             pos_x = (square.file_ - 0.5) * self.s_height
-            pos_y = (self.nrows + 0.5 - square.rank) * self.s_width
+            pos_y = (self.board.nrows + 0.5 - square.rank) * self.s_width
 
             text = self.canvas.create_text(pos_x, pos_y,
                 text = piece_list[piece.name]['unicode'], 
                 fill = piece.colour, font = (None, 35))
-                
-            text_list.append(text)
 
-        self.text_list = text_list
+            piece_loc[text] = piece.loc
+
+        self.piece_loc = piece_loc
 
         self.canvas.bind('<ButtonPress-1>', self.pick_up)
         self.canvas.bind('<B1-Motion>', self.drag)
 
-        def handler(event, self=self, board=board):
-            return self.drop(event, board)
-        self.canvas.bind('<ButtonRelease-1>', handler) 
+        self.canvas.bind('<ButtonRelease-1>', self.drop) 
 
     def pick_up(self, event):
    
-        object_id = self.canvas.find_closest(event.x, event.y, halo=5)[0]
+        object_id = self.canvas.find_closest(event.x, event.y, halo=0)[0]
 
-        if object_id in self.text_list:
+        if object_id in self.piece_loc.keys():
             self.drag_piece = object_id
-            self.drag_init_x = event.x
-            self.drag_init_y = event.y
             self.drag_x = event.x
             self.drag_y = event.y
         else:
@@ -416,18 +413,20 @@ class Display(tk.Tk):
             self.drag_x = event.x
             self.drag_y = event.y
 
-    def drop(self, event, board):
+    def drop(self, event):
         if self.drag_piece == None:
             pass
         else:
-            index_init_x, index_init_y = self.coords_to_index(
-                    self.drag_init_x, self.drag_init_y)
+            init_file, init_rank = (
+                move_to_rank_file(self.piece_loc[self.drag_piece]))
+            index_init_x = init_file
+            index_init_y = self.board.nrows + 1 - init_rank
             index_x, index_y = self.coords_to_index(event.x, event.y)
 
             move_start = self.index_to_move(index_init_x, index_init_y)
             move_end = self.index_to_move(index_x, index_y)
 
-            move_test = board.move(move_start, move_end)
+            move_test = self.board.move(move_start, move_end)
 
             if move_test:
                 pos_x = (index_x-0.5)*self.s_height
@@ -438,13 +437,12 @@ class Display(tk.Tk):
                 if piece_delete == self.drag_piece:
                     pass
 
-                elif piece_delete in self.text_list:
+                elif piece_delete in self.piece_loc.keys():
                     self.canvas.delete(piece_delete)
 
             else:
                 pos_x = (index_init_x-0.5)*self.s_height
                 pos_y = (index_init_y-0.5)*self.s_width
-                time.sleep(1)
 
             self.canvas.coords(self.drag_piece, (pos_x, pos_y))
 
@@ -455,7 +453,7 @@ class Display(tk.Tk):
 
     def index_to_move(self, index_x, index_y):
         file_ = round(index_x)
-        rank = round(self.nrows + 1 - index_y)
+        rank = round(self.board.nrows + 1 - index_y)
         move_code = alphabet[file_-1] + '{}'.format(rank)
         return move_code
 
