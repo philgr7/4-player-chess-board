@@ -76,10 +76,14 @@ class Board:
     #for legality and the move is applied and stored
     def move(self, move_start, move_end):
         piece_start = self.square_find(move_start).piece
+        block_end = self.square_find(move_end).blocked
 
         #Checks if piece in start square
         if piece_start == None:
             return print('No piece in start square')
+
+        if block_end:
+            return False
 
         #Based on move order sets what colour should be moving and what
         #move number has been reached
@@ -161,27 +165,29 @@ class Board:
             
         #index in python starts at 0, file/rank at 1, don't want to include
         #start square so range_start unchanged from min
-        range_start = min(move.f_start, move.f_end)
-        range_end = max(move.f_start, move.f_end) - 1
+        obstacle = self.hori_obst(move)
 
-        #Check for obstruction on path
-        for i in range(range_start, range_end):
-            if self.squares[move.r_start-1][i].obstruct() == True:
-                return False
-        return True
+        if obstacle == False:
+            return True
+        elif obstacle.loc == move.end:
+            print('same')
+            return True
+        else:
+            return False
 
     #Test movement along vertical lines
     def verti_test(self, move):
         if move.r_start == move.r_end or move.f_start != move.f_end:
             return False
 
-        range_start = min(move.r_start, move.r_end)
-        range_end = max(move.r_start, move.r_end) - 1
+        obstacle = self.verti_obst(move)
 
-        for i in range(range_start, range_end):
-            if self.squares[i][move.f_start-1].obstruct() == True:
-                return False
-        return True
+        if obstacle == False:
+            return True
+        elif obstacle.loc == move.end:
+            return True
+        else:
+            return False
 
     #Tests for movement along diagonal lines
     def diag_test(self, move):
@@ -194,25 +200,67 @@ class Board:
         if sum_equal == False and diff_equal == False:
             return False
 
-        min_r = min(move.r_start, move.r_end) - 1
+        obstacle = self.diag_obst(move)
+        
+        if obstacle == False:
+            return True
+        elif obstacle.loc == move.end:
+            return True
+        else:
+            return False
+
+    def hori_obst(self, move):
+        if move.f_start < move.f_end:
+            step = 1
+        else:
+            step = -1
+
+        range_start = move.f_start - 1 + step
+        range_end = move.f_end - 1 + step
+
+        #Check for obstruction on path
+        for i in range(range_start, range_end, step):
+            obstruction = self.squares[move.r_start-1][i].obstruct()
+            if obstruction != False:
+                return obstruction
+        return False
+
+    def verti_obst(self, move):
+        if move.r_start < move.r_end:
+            step = 1
+        else:
+            step = -1
+        
+        range_start = move.r_start - 1 + step
+        range_end = move.r_end - 1 + step
+
+        for i in range(range_start, range_end, step):
+            obstruction = self.squares[i][move.f_start-1].obstruct()
+            if obstruction != False:
+                return obstruction
+        return False
+
+    def diag_obst(self, move):
+        if move.r_start < move.r_end:
+            step_r = 1
+        else:
+            step_r = -1
+        if move.f_start < move.f_end:
+            step_f = 1
+        else:
+            step_f = -1
+
+        ind_r = move.r_start - 1 + step_r
+        ind_f = move.f_start - 1 + step_f
+
         diff = abs(move.r_diff())
 
-        #If sum equal then rank/file increase in opposite direction
-        if sum_equal == True:
-            f_loop = max(move.f_start, move.f_end) - 1
-            for i in range(1, diff):
-                if self.squares[min_r+i][f_loop-i].obstruct() == True:
-                    return False
-
-        #if difference equal then rank/file increase in same direction
-        elif diff_equal == True:
-            f_loop = min(move.f_start, move.f_end) - 1
-            for i in range(1, diff):
-                if self.squares[min_r+i][f_loop+i].obstruct() == True:
-                    return False
-
-        return True
-
+        for i in range(0, diff):
+            obstruct_ = self.squares[ind_r+i*step_r][ind_f+i*step_f].obstruct()
+            if obstruct_ != False:
+                return obstruct_
+        return False
+        
     def knight_test(self, move):
 
         #If rank/file change by 1/2 in any order than move is legal
@@ -306,7 +354,8 @@ class Square:
         if self.blocked == False and self.piece == None:
             return False
         else:
-            return True
+            print(self.name)
+            return self.piece
 
     #Returns string of position of piece
     def position(self):
@@ -343,7 +392,7 @@ class Display(tk.Tk):
         self.display()
 
     def display(self):
-        self.geometry('1000x600')
+        self.geometry('1000x700')
         self.canvas = tk.Canvas(self, width=self.board_width, 
                                 height = self.board_height)
         self.canvas.place(relx=0.5, rely=0.5, anchor = 'center')
@@ -402,49 +451,53 @@ class Display(tk.Tk):
 
     def drag(self, event):
         if self.drag_piece == None:
-            pass
+            return
 
-        else:
-            delta_x = event.x - self.drag_x
-            delta_y = event.y - self.drag_y
+        delta_x = event.x - self.drag_x
+        delta_y = event.y - self.drag_y
 
-            self.canvas.move(self.drag_piece, delta_x, delta_y)
+        self.canvas.move(self.drag_piece, delta_x, delta_y)
 
-            self.drag_x = event.x
-            self.drag_y = event.y
+        self.drag_x = event.x
+        self.drag_y = event.y
 
     def drop(self, event):
         if self.drag_piece == None:
-            pass
+            return
+
+        index_x, index_y = self.coords_to_index(event.x, event.y)
+        
+        move_start = self.piece_loc[self.drag_piece]
+        init_file, init_rank = move_to_rank_file(move_start)
+        index_init_x = init_file
+        index_init_y = self.board.nrows + 1 - init_rank
+
+        if (index_x > self.board.ncols or index_x < 1 or 
+            index_y > self.board.nrows or index_y < 1):
+            move_test = False
+
         else:
-            init_file, init_rank = (
-                move_to_rank_file(self.piece_loc[self.drag_piece]))
-            index_init_x = init_file
-            index_init_y = self.board.nrows + 1 - init_rank
-            index_x, index_y = self.coords_to_index(event.x, event.y)
-
-            move_start = self.index_to_move(index_init_x, index_init_y)
-            move_end = self.index_to_move(index_x, index_y)
-
+            move_end = self.index_to_move(index_x, index_y) 
             move_test = self.board.move(move_start, move_end)
+        
+        if move_test:
+            pos_x = (index_x-0.5)*self.s_height
+            pos_y = (index_y-0.5)*self.s_width
 
-            if move_test:
-                pos_x = (index_x-0.5)*self.s_height
-                pos_y = (index_y-0.5)*self.s_width
+            self.piece_loc[self.drag_piece] = move_end
+            piece_delete = self.canvas.find_closest(pos_x, pos_y)[0]
 
-                piece_delete = self.canvas.find_closest(pos_x, pos_y)[0]
+            if piece_delete == self.drag_piece:
+                pass
 
-                if piece_delete == self.drag_piece:
-                    pass
+            elif piece_delete in self.piece_loc.keys():
+                self.canvas.delete(piece_delete)
 
-                elif piece_delete in self.piece_loc.keys():
-                    self.canvas.delete(piece_delete)
+        else:
+            pos_x = (index_init_x-0.5)*self.s_height
+            pos_y = (index_init_y-0.5)*self.s_width
 
-            else:
-                pos_x = (index_init_x-0.5)*self.s_height
-                pos_y = (index_init_y-0.5)*self.s_width
-
-            self.canvas.coords(self.drag_piece, (pos_x, pos_y))
+        self.canvas.coords(self.drag_piece, (pos_x, pos_y))
 
     def coords_to_index(self, x, y):
         index_x = np.ceil(x/self.s_width)
@@ -456,11 +509,6 @@ class Display(tk.Tk):
         rank = round(self.board.nrows + 1 - index_y)
         move_code = alphabet[file_-1] + '{}'.format(rank)
         return move_code
-
-#Converts cm to inches for figure size
-def cm_to_inch(*args):
-    inch = 2.54
-    return tuple(i/inch for i in args)
 
 def move_to_rank_file(move_name):
     file_letter = move_name[0]
