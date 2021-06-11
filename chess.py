@@ -30,6 +30,7 @@ class Board:
         self.colours = colours
         self.rules = rules
         self.move_list = []
+        self.king_loc = {}
 
         self.board_init()
         self.piece_init()
@@ -53,19 +54,20 @@ class Board:
         #config if not stated otherwise which is defined 
     def piece_init(self, piece_order = ['Rook', 'Knight', 'Bishop',
         'King', 'Queen', 'Bishop', 'Knight', 'Rook']):
-        pieces = []
             #Loop initialises based on default piece locations
         for i in range(8):
-            self.squares[1][10-i].add_piece(Piece('Pawn', 'Red'))
-            self.squares[10-i][1].add_piece(Piece('Pawn', 'Blue'))
-            self.squares[12][3+i].add_piece(Piece('Pawn', 'Yellow'))
-            self.squares[3+i][12].add_piece(Piece('Pawn', 'Green'))
+            self.piece_add(self.squares[1][10-i], Piece('Pawn', 'Red'))
+            self.piece_add(self.squares[10-i][1], Piece('Pawn', 'Blue'))
+            self.piece_add(self.squares[12][3+i], Piece('Pawn', 'Yellow'))
+            self.piece_add(self.squares[3+i][12], Piece('Pawn', 'Green'))
 
-            self.squares[0][10-i].add_piece(Piece(piece_order[i], 'Red'))
-            self.squares[10-i][0].add_piece(Piece(piece_order[i], 'Blue'))
-            self.squares[13][3+i].add_piece(Piece(piece_order[i], 'Yellow'))
-            self.squares[3+i][13].add_piece(Piece(piece_order[i], 'Green'))
-        self.pieces = pieces
+            self.piece_add(self.squares[0][10-i], Piece(piece_order[i], 'Red'))
+            self.piece_add(self.squares[10-i][0], Piece(piece_order[i], 
+                            'Blue'))
+            self.piece_add(self.squares[13][3+i], Piece(piece_order[i], 
+                            'Yellow'))
+            self.piece_add(self.squares[3+i][13], Piece(piece_order[i], 
+                            'Green'))
 
     #Finds square object based on board co-ords
     def square_find(self, square_code):
@@ -109,9 +111,29 @@ class Board:
         #Carries out move and updates square objects, appending new move to
         #list
         if move_check == True:
-            self.square_find(move_end).add_piece(piece_start)
-            self.square_find(move_end).piece.moved = True
+            old_piece = self.square_find(move_end).piece
+            self.piece_add(self.square_find(move_end), piece_start)
             self.square_find(move_start).remove_piece()
+
+            if self.rules == True:
+                king_checks = self.check_test()
+                for idx, king_col in enumerate(king_checks):
+                    if king_col == colour:
+                        print('King in check')
+                        if old_piece is None:
+                            self.square_find(move_end).remove_piece()
+                        else:
+                            self.piece_add(self.square_find(move_end), 
+                                            old_piece)
+
+                        self.piece_add(self.square_find(move_start), 
+                                            piece_start)
+                        return False
+                    else:
+                        mate_test = self.test_mate(king_col)
+                        if mate_test:
+                            print('Checkmate')
+            self.square_find(move_end).piece.moved = True
             self.move_list.append(attempt_move)
             return True
         else:
@@ -119,7 +141,7 @@ class Board:
             return False
 
     #Check if legal move is being made
-    def legal_check(self, move, piece):
+    def legal_check(self, move, piece, dummy = False):
         #Checks if end square is blocked by piece of same colour
         try:
             if move.colour == self.square_find(move.end).piece.colour:
@@ -127,9 +149,11 @@ class Board:
         except AttributeError:
             pass
 
-        #If colour in start square not same as player who should be playing
-        if move.colour != piece.colour:
-            return False
+        if dummy == False:
+            #If colour in start square not same as player who should be playing
+            if move.colour != piece.colour and dummy == False:
+                print('Invalid move - {} to move'.format(move.colour))
+                return False
 
         #Tests check for obstructions and whether piece has capability
         #to move between designated squares
@@ -169,8 +193,9 @@ class Board:
 
         if obstacle == False:
             return True
+        elif obstacle == True:
+            return False
         elif obstacle.loc == move.end:
-            print('same')
             return True
         else:
             return False
@@ -184,6 +209,8 @@ class Board:
 
         if obstacle == False:
             return True
+        elif obstacle == True:
+            return False
         elif obstacle.loc == move.end:
             return True
         else:
@@ -204,6 +231,8 @@ class Board:
         
         if obstacle == False:
             return True
+        elif obstacle == True:
+            return False
         elif obstacle.loc == move.end:
             return True
         else:
@@ -256,7 +285,8 @@ class Board:
         diff = abs(move.r_diff())
 
         for i in range(0, diff):
-            obstruct_ = self.squares[ind_r+i*step_r][ind_f+i*step_f].obstruct()
+            obstruct_ = (self
+            .squares[ind_r+i*step_r][ind_f+i*step_f].obstruct())
             if obstruct_ != False:
                 return obstruct_
         return False
@@ -274,6 +304,7 @@ class Board:
     def king_test(self, move):
         #Moves by 1 in any direction
         if abs(move.f_diff()) <= 1 and abs(move.r_diff()) <= 1:
+            self.king_loc[move.colour] = move.end
             return True
         else: 
             return False
@@ -314,6 +345,98 @@ class Board:
                 return True
         return False
 
+    #Find pieces in hori/verti/diag line of sight of a king as well as 
+    #knight moves on king and check if there is piece that checks the
+    #king
+    def check_test(self):
+        print(self.king_loc)
+        kings_in_check = []
+        for key in self.king_loc:
+            king_col = key
+            king_loc = self.king_loc[key]
+
+            check_pieces = self.hori_verti_diag_extent(king_loc)
+            move_end = king_loc
+            print(key)
+            for idx, piece in enumerate(check_pieces):
+                move_start = piece.loc
+                colour = piece.colour
+                attempt_move = Move(0, colour, move_start, move_end)
+                check_test = self.legal_check(attempt_move, piece, 
+                                            dummy = True)
+                print(piece.loc, check_test)
+                if check_test:
+                    if king_col not in kings_in_check:
+                        kings_in_check.append(king_col)
+        return kings_in_check
+
+    def hori_verti_diag_extent(self, move_code):
+        los_list = []
+       
+        file_, rank = move_to_rank_file(move_code)
+
+        loop_directions = [[-1, -1], [-1, 0], [-1, 1], [0, -1],
+                            [0, 1], [1, -1], [1, 0], [1, 1]]
+
+        for idx, val in enumerate(loop_directions):
+            f_index = file_ - 1 
+            r_index = rank - 1
+            f_step = val[0]
+            r_step = val[1]
+            stop = False
+            while ((f_index < self.ncols and f_index >= 0) and
+                    (r_index < self.nrows and r_index >= 0) and 
+                    stop == False):
+                
+                f_index = f_index + f_step
+                r_index = r_index + r_step
+
+                if f_index < 0 or r_index < 0:
+                    continue
+
+                try:
+                    los = self.squares[r_index][f_index].obstruct()
+                except IndexError:
+                    los = 0
+                    pass
+
+                if not isinstance(los, int):
+                    stop = True
+                    los_list.append(los)
+                
+        return los_list
+
+    def test_mate(self, king_col):
+
+        move_start = self.king_loc[king_col]
+        piece = self.square_find(move_start).piece
+        
+        file_, rank = move_to_rank_file(move_start)
+        
+        move_direct = [[-1, -1], [-1, 0], [-1, 1], [0, -1],
+                        [0, 1], [1, -1], [1, 0], [1, 1]]
+
+        for idx, val in enumerate(move_direct):
+            f_index = file_ - 1 + val[0]
+            r_index = rank - 1 + val[1]
+            
+            if (f_index < 0 or f_index > self.ncols - 1 or
+                r_index < 0 or r_index > self.nrows - 1):
+                continue
+            move_end = self.squares[r_index][f_index].name
+
+            attempt_move = Move(0, king_col, move_start, move_end)
+            check_test = self.legal_check(attempt_move, piece, 
+                                    dummy = True)
+            if check_test:
+                return False
+        return True
+
+    def piece_add(self, square, piece):
+        square.add_piece(piece)
+        if piece.name == 'King':
+            self.king_loc[piece.colour] = piece.loc
+
 #Creates class for a chess piece
 class Piece:
 
@@ -353,8 +476,9 @@ class Square:
     def obstruct(self):
         if self.blocked == False and self.piece == None:
             return False
+        elif self.blocked == True:
+            return True
         else:
-            print(self.name)
             return self.piece
 
     #Returns string of position of piece
@@ -484,14 +608,17 @@ class Display(tk.Tk):
             pos_x = (index_x-0.5)*self.s_height
             pos_y = (index_y-0.5)*self.s_width
 
-            self.piece_loc[self.drag_piece] = move_end
-            piece_delete = self.canvas.find_closest(pos_x, pos_y)[0]
+            try:
+                piece_delete = list(self.piece_loc.keys())[list(
+                    self.piece_loc.values()).index(move_end)]
 
-            if piece_delete == self.drag_piece:
+                self.canvas.delete(piece_delete)
+                
+                self.piece_loc[piece_delete] = False
+            except ValueError:
                 pass
 
-            elif piece_delete in self.piece_loc.keys():
-                self.canvas.delete(piece_delete)
+            self.piece_loc[self.drag_piece] = move_end
 
         else:
             pos_x = (index_init_x-0.5)*self.s_height
