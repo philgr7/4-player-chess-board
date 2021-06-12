@@ -76,50 +76,74 @@ class Board:
 
     #After a move is requested if rules is turned on then a check is done
     #for legality and the move is applied and stored
-    def move(self, move_start, move_end):
+    def move(self, move_start, move_end, dummy = False):
         piece_start = self.square_find(move_start).piece
-        block_end = self.square_find(move_end).blocked
 
         #Checks if piece in start square
         if piece_start == None:
             return print('No piece in start square')
 
-        if block_end:
+        #If end square is blocked from initialisation then move cannot occur
+        if self.square_find(move_end).blocked:
             return False
 
-        #Based on move order sets what colour should be moving and what
-        #move number has been reached
-        if self.move_list == []:
-            move_number = 1
-            colour = colour_list[0]
-        else:
-            index_ = (colour_list.index(self.move_list[-1].colour) + 1) %4
-            colour = colour_list[index_]
-            if self.move_list[-1].colour == colour_list[-1]:
-                move_number = self.move_list[-1].number + 1
+        if not dummy:
+            #Based on move order sets what colour should be moving and what
+            #move number has been reached
+            if self.move_list == []:
+                move_number = 1
+                colour = colour_list[0]
             else:
-                move_number = self.move_list[-1].number
+                num_clrs = len(colour_list)
+                index_ = ((colour_list.index(
+                                self.move_list[-1].colour) + 1) %num_clrs)
+                colour = colour_list[index_]
+                if self.move_list[-1].colour == colour_list[-1]:
+                    move_number = self.move_list[-1].number + 1
+                else:
+                    move_number = self.move_list[-1].number
+        else:
+            colour = None
+            move_number = 0
 
+        #Creates Move object for testing that will be applied if success 
         attempt_move = Move(move_number, colour, move_start, move_end)
 
         #If rules turned on, checks if legal move has been made
         if self.rules == True:
-            move_check = self.legal_check(attempt_move, piece_start)
+            move_check = self.legal_check(attempt_move, piece_start, dummy)
         else:
             move_check = True
 
-        #Carries out move and updates square objects, appending new move to
+        #Carries out move and does finally confirms existence of checks
+        #if successful then updates square objects, appending new move to
         #list
         if move_check == True:
             old_piece = self.square_find(move_end).piece
             self.piece_add(self.square_find(move_end), piece_start)
             self.square_find(move_start).remove_piece()
-
+            
+            #If rules on all kings are checked for whether in check
             if self.rules == True:
-                king_checks = self.check_test()
-                for idx, king_col in enumerate(king_checks):
+                king_checks = self.all_check_test()
+                print(king_checks)
+                
+                if dummy:
+                    if old_piece is None:
+                        self.square_find(move_end).remove_piece()
+                    else:
+                        self.piece_add(self.square_find(move_end), 
+                                        old_piece)
+
+                    self.piece_add(self.square_find(move_start), 
+                                        piece_start)
+                    return king_checks
+                
+                for king_col in king_checks:
+                    #if king of colour of move in check then move
+                    #is illegal and so need to reset positions of 
+                    #pieces which were shadow moved
                     if king_col == colour:
-                        print('King in check')
                         if old_piece is None:
                             self.square_find(move_end).remove_piece()
                         else:
@@ -128,32 +152,42 @@ class Board:
 
                         self.piece_add(self.square_find(move_start), 
                                             piece_start)
+                        print('King in check')
                         return False
+
+                    #If king of different colour in check then need to 
+                    #confirm if mated
                     else:
-                        mate_test = self.test_mate(king_col)
+                        mate_test = self.test_mate(king_checks[king_col],
+                                                    king_col)
                         if mate_test:
                             print('Checkmate')
+            
+            #If reaches here then move is allowed to occur and is recorded
             self.square_find(move_end).piece.moved = True
             self.move_list.append(attempt_move)
             return True
+        #Return invalid move if move_check has failed
         else:
-            print('Invalid move entered')
+            if not dummy:
+                print('Invalid move entered')
             return False
 
-    #Check if legal move is being made
+    #Check if legal move is being made, dummy is true if move is not 
+    #suggested but just a check for legality of a board position
     def legal_check(self, move, piece, dummy = False):
         #Checks if end square is blocked by piece of same colour
         try:
-            if move.colour == self.square_find(move.end).piece.colour:
+            if piece.colour == self.square_find(move.end).piece.colour:
                 return False
         except AttributeError:
             pass
 
-        if dummy == False:
-            #If colour in start square not same as player who should be playing
-            if move.colour != piece.colour and dummy == False:
-                print('Invalid move - {} to move'.format(move.colour))
-                return False
+        #If colour in start square not same as player who should be playing
+        #doesn't matter if dummy move
+        if move.colour != piece.colour and dummy == False:
+            print('Invalid move - {} to move'.format(move.colour))
+            return False
 
         #Tests check for obstructions and whether piece has capability
         #to move between designated squares
@@ -187,8 +221,9 @@ class Board:
         if move.f_start == move.f_end or move.r_start != move.r_end:
             return False
             
-        #index in python starts at 0, file/rank at 1, don't want to include
-        #start square so range_start unchanged from min
+        #Checks if obstacle present - if no obstacle (False) or obstacle
+        #is at end square then the move is legal. obstacle = True if 
+        #trying to pass through blocked squares
         obstacle = self.hori_obst(move)
 
         if obstacle == False:
@@ -200,11 +235,13 @@ class Board:
         else:
             return False
 
-    #Test movement along vertical lines
+    #Test movement along vertical lines 
     def verti_test(self, move):
+        #movement can only occur if rank changes and file stays the same
         if move.r_start == move.r_end or move.f_start != move.f_end:
             return False
 
+        #same obstacle logic as hori_test
         obstacle = self.verti_obst(move)
 
         if obstacle == False:
@@ -227,6 +264,7 @@ class Board:
         if sum_equal == False and diff_equal == False:
             return False
 
+        #Same obstacle logic as hori_test
         obstacle = self.diag_obst(move)
         
         if obstacle == False:
@@ -238,22 +276,29 @@ class Board:
         else:
             return False
 
+    #checks for first obstacle for a given horizontal move
     def hori_obst(self, move):
+
+        #step sets if needs to loop positively or negatively through squares
         if move.f_start < move.f_end:
             step = 1
         else:
             step = -1
 
+        #Don't want to check obstacles in starting square so need to add step
+        #from before loop starts
         range_start = move.f_start - 1 + step
         range_end = move.f_end - 1 + step
 
-        #Check for obstruction on path
+        #Loops between two board locations and stops if obstacle is found
         for i in range(range_start, range_end, step):
             obstruction = self.squares[move.r_start-1][i].obstruct()
             if obstruction != False:
                 return obstruction
         return False
 
+    #checks for first obstacle in given vertical move - logic same as 
+    #hori_obst
     def verti_obst(self, move):
         if move.r_start < move.r_end:
             step = 1
@@ -269,7 +314,9 @@ class Board:
                 return obstruction
         return False
 
+    #Checks for first obstacle in given diagonal move
     def diag_obst(self, move):
+        #step for both rank/file based on which direction move is occuring in
         if move.r_start < move.r_end:
             step_r = 1
         else:
@@ -282,6 +329,7 @@ class Board:
         ind_r = move.r_start - 1 + step_r
         ind_f = move.f_start - 1 + step_f
 
+        #Use difference to loop between board positions unless obstacle found
         diff = abs(move.r_diff())
 
         for i in range(0, diff):
@@ -302,16 +350,17 @@ class Board:
             return False
 
     def king_test(self, move):
-        #Moves by 1 in any direction
+        #King can move 1 space in any direction - whether king is in check
+        #is checked later on
         if abs(move.f_diff()) <= 1 and abs(move.r_diff()) <= 1:
-            self.king_loc[move.colour] = move.end
             return True
         else: 
             return False
 
     def pawn_test(self, move, piece):
         #Based on direction pawn is facing, defines rotation vectors that
-        #allow for testing if move is valid
+        #allow for testing if move is valid which represents
+        #[change in rank, change in file]
         direct = piece.direction
         theta = np.radians(90*direct)
         c, s = round(np.cos(theta)), round(np.sin(theta))
@@ -321,13 +370,16 @@ class Board:
         diff_diag_1 = np.array([c-s, s-c])
         diff_diag_2 = np.array([c+s, s+c])
 
+        #checks for piece at end square and whether pawn has moved before
         piece_check = self.square_find(move.end).piece
         moved_check = piece.last_move
 
-        #Compares allowed moves for pawn in certain direction with 
-        #attempted move for cases of moving 1 or 2 squares forward or capture
+        #The change in rank/file of the attempted move 
         rf_diff = [move.r_diff(), move.f_diff()]
-    
+        
+        #Compares change in rank/file of attempted move with that of
+        #theoretically allowed moves (either 1 move foward, 2 moves forward
+        #or diagonal piece capture
         m1_check = np.array_equal(rf_diff, diff_arr)
         m2_check = np.array_equal(rf_diff, 2*diff_arr)
         diag_check = (np.array_equal(rf_diff, diff_diag_1) or
@@ -337,6 +389,7 @@ class Board:
         if piece_check == None:
             if m1_check == True:
                 return True
+            #2 moves forward only allowed if pawn has not moved
             elif m2_check == True and moved_check == False:
                 return True
         #If piece present then check if diagonal capture is possible
@@ -345,36 +398,52 @@ class Board:
                 return True
         return False
 
+    def all_check_test(self):
+        print(self.king_loc)
+
+        check_list = {}
+        for key in self.king_loc:
+            print(key)
+            king_col = key
+            king_loc = self.king_loc[key]
+            piece_checks = self.check_test(king_col, king_loc)
+
+            if piece_checks:
+                check_list[king_col] = piece_checks
+
+        return check_list
+
     #Find pieces in hori/verti/diag line of sight of a king as well as 
     #knight moves on king and check if there is piece that checks the
     #king
-    def check_test(self):
-        print(self.king_loc)
-        kings_in_check = []
-        for key in self.king_loc:
-            king_col = key
-            king_loc = self.king_loc[key]
+    def check_test(self, king_col, king_loc):
 
-            check_pieces = self.hori_verti_diag_extent(king_loc)
-            move_end = king_loc
-            print(key)
-            for idx, piece in enumerate(check_pieces):
-                move_start = piece.loc
-                colour = piece.colour
-                attempt_move = Move(0, colour, move_start, move_end)
-                check_test = self.legal_check(attempt_move, piece, 
-                                            dummy = True)
-                print(piece.loc, check_test)
-                if check_test:
-                    if king_col not in kings_in_check:
-                        kings_in_check.append(king_col)
-        return kings_in_check
+        king_checks = []
 
+        check_pieces = self.hori_verti_diag_extent(king_loc)
+        move_end = king_loc
+        for idx, piece in enumerate(check_pieces):
+            move_start = piece.loc
+            colour = piece.colour
+            if colour == king_col:
+                continue
+            attempt_move = Move(0, colour, move_start, move_end)
+            check_test = self.legal_check(attempt_move, piece, 
+                                        dummy = True)
+            print(move_start, move_end, check_test)
+            if check_test:
+                king_checks.append(piece)
+        return king_checks
+
+    #Returns list of pieces in hori/verti/diag line of sight of king
     def hori_verti_diag_extent(self, move_code):
+
+        #list of piece in line of sight (los)
         los_list = []
        
         file_, rank = move_to_rank_file(move_code)
 
+        #8 direction vectors for hori/verti/diag from king to loop over
         loop_directions = [[-1, -1], [-1, 0], [-1, 1], [0, -1],
                             [0, 1], [1, -1], [1, 0], [1, 1]]
 
@@ -384,29 +453,41 @@ class Board:
             f_step = val[0]
             r_step = val[1]
             stop = False
+
+            #f/r indices need to be within extent of cols/rows of board 
             while ((f_index < self.ncols and f_index >= 0) and
                     (r_index < self.nrows and r_index >= 0) and 
                     stop == False):
                 
+                #f/r indices updated at start so that starting square not used
                 f_index = f_index + f_step
                 r_index = r_index + r_step
 
+                #if index update pushes index out of board extent continues
                 if f_index < 0 or r_index < 0:
                     continue
 
+                #tries to check for obstruction except if out of board extent
                 try:
                     los = self.squares[r_index][f_index].obstruct()
                 except IndexError:
                     los = 0
                     pass
 
+                #if obstruct = False or True then no piece obstruction found
+                #booleans are counted as integers in isinstance
                 if not isinstance(los, int):
                     stop = True
                     los_list.append(los)
                 
         return los_list
 
-    def test_mate(self, king_col):
+    #Checks if king is mated - 3 checks: if double check then king has to
+    #move/capture something, if single check then either capture attacking
+    #piece, king moves/captures or block line of site of piece
+    def test_mate(self, king_checks, king_col):
+
+        print(king_checks, king_col)
 
         move_start = self.king_loc[king_col]
         piece = self.square_find(move_start).piece
@@ -425,13 +506,50 @@ class Board:
                 continue
             move_end = self.squares[r_index][f_index].name
 
-            attempt_move = Move(0, king_col, move_start, move_end)
-            check_test = self.legal_check(attempt_move, piece, 
-                                    dummy = True)
-            if check_test:
+            checked_checks = self.move(move_start, move_end, dummy = True) 
+            print(checked_checks)
+            if checked_checks == False:
+                continue
+            if not king_col in checked_checks:
                 return False
+
+#            attempt_move = Move(0, king_col, move_start, move_end)
+ #           legal_test = self.legal_check(attempt_move, piece, 
+  #                                  dummy = True)
+   #         print(move_start, move_end, legal_test)
+    #        if legal_test:
+     #           check_test = self.check_test(king_col, move_end)
+      #          print(check_test)
+       #         if not check_test:
+        #            return False
+        if len(king_checks) > 1:
+            return True
+
+        move_end = king_checks[0].loc
+        att_pieces = self.hori_verti_diag_extent(move_end)
+
+        for idx, piece in enumerate(att_pieces):
+            move_start = piece.loc
+            colour = piece.colour
+            if colour != king_col:
+                continue
+            checked_checks = self.move(move_start, move_end, dummy = True)
+            print(checked_checks)
+            if checked_checks == False:
+                continue
+            if not king_col in checked_checks:
+                return False
+#            attempt_move = Move(0, colour, move_start, move_end)
+ #           capture_test = self.legal_check(attempt_move, piece, 
+  #                                      dummy = True)
+   #         if capture_test:
+    #            check_test = self.check_test(king_col, self.king_loc[king_col])
+      #          if not check_test:
+     #               return False
+
         return True
 
+    #Add piece to a square and updates data on king locations
     def piece_add(self, square, piece):
         square.add_piece(piece)
         if piece.name == 'King':
@@ -503,6 +621,7 @@ class Move:
 
 class Display(tk.Tk):
 
+    #Initialises board and dimensions
     def __init__(self, board = Board()):
         super().__init__()
         self.board_height = 500
@@ -510,6 +629,7 @@ class Display(tk.Tk):
 
         self.board = board
 
+        #stores square height/width
         self.s_width = self.board_width/self.board.ncols
         self.s_height = self.board_height/self.board.nrows
 
