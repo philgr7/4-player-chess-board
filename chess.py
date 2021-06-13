@@ -5,10 +5,10 @@ import tkinter as tk
 import time
 
 #Colours available in four player chess
-colour_list = ('Red', 'Blue', 'Yellow', 'Green')
+COLOUR_INFO = ('Red', 'Blue', 'Yellow', 'Green')
 
 #List of available pieces with point value and corresponding unicode 
-piece_list = {
+PIECE_INFO = {
             'Pawn': {'value': 1, 'unicode': '\u265F', 'symbol': ''},
             'Knight': {'value': 3, 'unicode': '\u265E', 'symbol': 'N'},
             'Bishop': {'value': 5, 'unicode': '\u265D', 'symbol': 'B'},
@@ -23,7 +23,7 @@ alphabet = string.ascii_lowercase
 class Board:
     #Default board is set as 14 rows/columns and with RBYG colours
     def __init__(self, nrows = 14, ncols = 14, corner = 3, colours = 
-                colour_list, rules = True):
+                COLOUR_INFO, rules = True):
         self.nrows = nrows
         self.ncols = ncols
         self.corner = corner
@@ -92,13 +92,13 @@ class Board:
             #move number has been reached
             if self.move_list == []:
                 move_number = 1
-                colour = colour_list[0]
+                colour = self.colours[0]
             else:
-                num_clrs = len(colour_list)
-                index_ = ((colour_list.index(
+                num_clrs = len(self.colours)
+                index_ = ((self.colours.index(
                                 self.move_list[-1].colour) + 1) %num_clrs)
-                colour = colour_list[index_]
-                if self.move_list[-1].colour == colour_list[-1]:
+                colour = self.colours[index_]
+                if self.move_list[-1].colour == self.colours[-1]:
                     move_number = self.move_list[-1].number + 1
                 else:
                     move_number = self.move_list[-1].number
@@ -123,10 +123,10 @@ class Board:
             self.piece_add(self.square_find(move_end), piece_start)
             self.square_find(move_start).remove_piece()
             
+            new_check = 0 #counter for how many new_checks are given
             #If rules on all kings are checked for whether in check
             if self.rules == True:
                 king_checks = self.all_check_test()
-                print(king_checks)
                 
                 if dummy:
                     if old_piece is None:
@@ -138,7 +138,9 @@ class Board:
                     self.piece_add(self.square_find(move_start), 
                                         piece_start)
                     return king_checks
-                
+
+                print(king_checks)
+
                 for king_col in king_checks:
                     #if king of colour of move in check then move
                     #is illegal and so need to reset positions of 
@@ -163,9 +165,19 @@ class Board:
                         if mate_test:
                             print('Checkmate')
             
+                #Confirm whether move caused a new check
+                if king_checks:
+                    attempt_move.checks = king_checks
+                    prev_move_checks = self.move_list[-1].checks
+                    for king_col in king_checks:
+                        if not king_col in prev_move_checks:
+                            new_check = new_check + 1
+                    
             #If reaches here then move is allowed to occur and is recorded
+
             self.square_find(move_end).piece.moved = True
             self.move_list.append(attempt_move)
+            attempt_move.pgn_create(piece_start, old_piece, new_check)
             return True
         #Return invalid move if move_check has failed
         else:
@@ -403,7 +415,6 @@ class Board:
 
         check_list = {}
         for key in self.king_loc:
-            print(key)
             king_col = key
             king_loc = self.king_loc[key]
             piece_checks = self.check_test(king_col, king_loc)
@@ -430,9 +441,15 @@ class Board:
             attempt_move = Move(0, colour, move_start, move_end)
             check_test = self.legal_check(attempt_move, piece, 
                                         dummy = True)
-            print(move_start, move_end, check_test)
             if check_test:
                 king_checks.append(piece)
+
+        knight_checks = self.knight_extent(king_loc)
+
+        for knight in knight_checks:
+            if knight.colour != king_col:
+                king_checks.append(knight)
+
         return king_checks
 
     #Returns list of pieces in hori/verti/diag line of sight of king
@@ -482,13 +499,35 @@ class Board:
                 
         return los_list
 
+    def knight_extent(self, move_code):
+        knight_list = []
+
+        file_, rank = move_to_rank_file(move_code)
+        f_index_start = file_ - 1
+        r_index_start = rank - 1
+        knight_moves = [[2, 1], [2, -1], [-2, 1], [-2, -1],
+                        [1, 2], [1, -2], [-1, 2], [-1, -2]]
+        for idx, val in enumerate(knight_moves):
+            r_index = r_index_start + val[0]
+            f_index = f_index_start + val[1]
+           
+            if (f_index < 0 or r_index < 0 or f_index >= self.ncols or
+                r_index >= self.nrows):
+                continue
+
+            knight_check = self.squares[r_index][f_index].obstruct()
+            if not isinstance(knight_check, int):
+                if knight_check.name == 'Knight':
+                    knight_list.append(knight_check)
+
+        return knight_list
+
     #Checks if king is mated - 3 checks: if double check then king has to
     #move/capture something, if single check then either capture attacking
     #piece, king moves/captures or block line of site of piece
     def test_mate(self, king_checks, king_col):
 
-        print(king_checks, king_col)
-
+        #Checks if king can move/capture out of check
         move_start = self.king_loc[king_col]
         piece = self.square_find(move_start).piece
         
@@ -507,26 +546,19 @@ class Board:
             move_end = self.squares[r_index][f_index].name
 
             checked_checks = self.move(move_start, move_end, dummy = True) 
-            print(checked_checks)
             if checked_checks == False:
                 continue
             if not king_col in checked_checks:
                 return False
 
-#            attempt_move = Move(0, king_col, move_start, move_end)
- #           legal_test = self.legal_check(attempt_move, piece, 
-  #                                  dummy = True)
-   #         print(move_start, move_end, legal_test)
-    #        if legal_test:
-     #           check_test = self.check_test(king_col, move_end)
-      #          print(check_test)
-       #         if not check_test:
-        #            return False
+        #If double check (and king can't move) then king is mated
         if len(king_checks) > 1:
             return True
 
+        #Checks if a piece can capture the checking piece
         move_end = king_checks[0].loc
-        att_pieces = self.hori_verti_diag_extent(move_end)
+        att_pieces = (self.hori_verti_diag_extent(move_end) + 
+                    self.knight_extent(move_end))
 
         for idx, piece in enumerate(att_pieces):
             move_start = piece.loc
@@ -534,18 +566,65 @@ class Board:
             if colour != king_col:
                 continue
             checked_checks = self.move(move_start, move_end, dummy = True)
-            print(checked_checks)
             if checked_checks == False:
                 continue
             if not king_col in checked_checks:
                 return False
-#            attempt_move = Move(0, colour, move_start, move_end)
- #           capture_test = self.legal_check(attempt_move, piece, 
-  #                                      dummy = True)
-   #         if capture_test:
-    #            check_test = self.check_test(king_col, self.king_loc[king_col])
-      #          if not check_test:
-     #               return False
+
+        #Checks if the checking piece can be obstructed (can't if knight so)
+        #if mate in that case
+    
+        if king_checks[0].name == 'Knight':
+            return True
+
+        king_f, king_r = move_to_rank_file(self.king_loc[king_col])
+        checker_f, checker_r = move_to_rank_file(move_end)
+
+        r_start = king_r - 1
+        f_start = king_f - 1
+
+        diff_f = checker_f - king_f
+        diff_r = checker_r - king_r
+
+        if diff_f > 0:
+            f_step = 1
+        elif diff_f == 0:
+            f_step = 0
+        elif diff_f < 0:
+            f_step = -1
+        if diff_r > 0:
+            r_step = 1
+        elif diff_r == 0:
+            r_step = 0
+        elif diff_r < 0:
+            r_step = -1
+
+        max_diff = max(abs(diff_f), abs(diff_r))
+
+        print(max_diff, r_step, f_step)
+
+        for i in range(1, max_diff):
+            r_index = r_start + i*r_step
+            f_index = f_start + i*f_step
+
+            square = self.squares[r_index][f_index]
+            
+            obstr_loc = square.name
+
+            obstr_pieces = (self.hori_verti_diag_extent(obstr_loc) + 
+                                self.knight_extent(obstr_loc))
+
+            print(obstr_pieces, obstr_loc)
+            for piece in obstr_pieces:
+                if piece.colour != king_col:
+                    continue
+                move_start = piece.loc
+                checked_checks = self.move(move_start, obstr_loc, dummy = True)
+                print(checked_checks)
+                if checked_checks == False:
+                    continue
+                if not king_col in checked_checks:
+                    return False
 
         return True
 
@@ -561,12 +640,12 @@ class Piece:
     def __init__(self, name, colour, last_move = False):
         self.name = name
         self.colour = colour
-        self.value = piece_list[name]['value']
+        self.value = PIECE_INFO[name]['value']
         self.last_move = last_move
 
         self.loc = 0
 
-        self.direction = colour_list.index(colour)
+        self.direction = COLOUR_INFO.index(colour)
 
 class Square:
     def __init__(self, rank, file_, blocked = False):
@@ -612,12 +691,32 @@ class Move:
         self.f_start, self.r_start = move_to_rank_file(self.start)
         self.end = end
         self.f_end, self.r_end = move_to_rank_file(self.end)
+        self.checks = []
 
     def r_diff(self):
         return self.r_end - self.r_start
 
     def f_diff(self):
         return self.f_end - self.f_start
+
+    def pgn_create(self, piece_start, piece_end, check):
+        
+        start_string = PIECE_INFO[piece_start.name]['symbol'] + self.start
+
+        if piece_end is None:
+            middle = '-'
+            end_string = self.end
+        else:
+            middle = 'x'
+            end_string = PIECE_INFO[piece_end.name]['symbol'] + self.end
+
+        if check:
+            check_string = '+'
+        else:
+            check_string = ''
+        
+        self.pgn = start_string + middle + end_string + check_string
+        print(self.pgn)
 
 class Display(tk.Tk):
 
@@ -670,7 +769,7 @@ class Display(tk.Tk):
             pos_y = (self.board.nrows + 0.5 - square.rank) * self.s_width
 
             text = self.canvas.create_text(pos_x, pos_y,
-                text = piece_list[piece.name]['unicode'], 
+                text = PIECE_INFO[piece.name]['unicode'], 
                 fill = piece.colour, font = (None, 35))
 
             piece_loc[text] = piece.loc
