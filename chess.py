@@ -5,7 +5,7 @@ import tkinter as tk
 import time
 
 #Colours available in four player chess
-COLOUR_INFO = ('Red', 'Blue', 'Yellow', 'Green')
+COLOUR_INFO = ['Red', 'Blue', 'Yellow', 'Green']
 
 #List of available pieces with point value and corresponding unicode 
 PIECE_INFO = {
@@ -22,12 +22,11 @@ alphabet = string.ascii_lowercase
 #Creates class for chessboard
 class Board:
     #Default board is set as 14 rows/columns and with RBYG colours
-    def __init__(self, nrows = 14, ncols = 14, corner = 3, colours = 
-                COLOUR_INFO, rules = True):
+    def __init__(self, nrows = 14, ncols = 14, corner = 3, rules = True):
         self.nrows = nrows
         self.ncols = ncols
         self.corner = corner
-        self.colours = colours
+        self.colours = [colour for colour in COLOUR_INFO]
         self.rules = rules
         self.move_list = []
         self.king_loc = {}
@@ -723,22 +722,101 @@ class Display(tk.Tk):
     #Initialises board and dimensions
     def __init__(self, board = Board()):
         super().__init__()
-        self.board_height = 500
-        self.board_width = 500
 
         self.board = board
+        
+        self.board_width = 500
+        self.board_height = 500
 
         #stores square height/width
         self.s_width = self.board_width/self.board.ncols
         self.s_height = self.board_height/self.board.nrows
 
+        self.display_init()
         self.display()
 
+    def display_init(self):
+        self.frame = tk.Frame(self)
+
+        self.frame.pack()
+
+        self.board_canvas = tk.Canvas(self.frame, height = self.board_height,
+                        width = self.board_width, highlightthickness = 0)
+        self.board_canvas.grid(column = 2, row = 1)
+
+        self.colour_init()
+        self.tools_init()
+        self.rank_file_labels()
+
+    def colour_init(self):
+        self.col_1 = tk.Canvas(self.frame, background = 'white', height = 100,
+            width = self.board_width, highlightthickness = 0)
+        self.col_1.grid(column = 2, row = 3)
+        self.col_2 = tk.Canvas(self.frame, background = 'white', width = 100,
+            height = self.board_height, highlightthickness = 0)
+        self.col_2.grid(column = 0, row = 1)
+        self.col_3 = tk.Canvas(self.frame, background = 'white', height = 100,
+            width = self.board_width, highlightthickness = 0)
+        self.col_3.grid(column = 2, row =0)
+        self.col_4 = tk.Canvas(self.frame, background = 'white', width = 100,
+                height = self.board_height, highlightthickness = 0)
+        self.col_4.grid(column = 3, row = 1)
+
+    def tools_init(self):
+        self.tools = tk.Canvas(self.frame, background = 'red', width = 300,
+            height = self.board_height, highlightthickness = 0)
+        self.tools.grid(column = 4, row = 1)
+
+        self.tool_frame = tk.Frame(self.tools, background = 'white',
+            width = 300, height = self.board_height)
+        self.tool_scroll = tk.Scrollbar(self.frame, orient = 'vertical',
+            command = self.tools.yview)
+
+        self.tools.config(yscrollcommand = self.tool_scroll.set)
+
+        self.tool_frame.grid(column = 0, row = 0)
+        self.tool_scroll.grid(column = 5, row = 1, sticky = 'ns')
+
+        self.tool_window = self.tools.create_window((0,0),
+                window = self.tool_frame, anchor = 'nw')
+
+        self.tool_frame.bind('<Configure>', self.toolconfig)
+
+        self.tool_opt()
+
+    def tool_opt(self):
+        self.tool_options = tk.LabelFrame(self.frame, background = 'white',
+            width = 300, height = 25, highlightthickness = 0)
+        self.tool_options.grid(row = 2, column = 4)
+
+        self.move_but = tk.Button(self.tool_options, text = 'Moves',
+                width = 5, height = 1)
+        self.move_but.pack(side = 'left')
+
+        self.new_but = tk.Button(self.tool_options, text = 'New game',
+                width = 5, height = 1)
+        self.new_but.pack(side = 'left')
+
+        self.save_but = tk.Button(self.tool_options, text = 'Save',
+                width = 5, height = 1)
+        self.save_but.pack(side = 'left')
+
+        self.load_but = tk.Button(self.tool_options, text = 'Load',
+                width = 5, height = 1)
+        self.load_but.pack(side = 'left')
+
+    def toolconfig(self, event):
+        self.tools.configure(scrollregion = self.tool_frame.bbox('all'))
+
+    def rank_file_labels(self):
+        self.file_labels = tk.Canvas(self.frame, width = self.board_width,
+            height = 25, highlightthickness = 0)
+        self.file_labels.grid(column = 2, row = 2)
+        self.rank_labels = tk.Canvas(self.frame, width = 25,
+            height = self.board_height, highlightthickness = 0)
+        self.rank_labels.grid(column = 1, row = 1)
+
     def display(self):
-        self.geometry('1000x700')
-        self.canvas = tk.Canvas(self, width=self.board_width, 
-                                height = self.board_height)
-        self.canvas.place(relx=0.5, rely=0.5, anchor = 'center')
         
         piece_loc = {}
         for i in range(self.board.nrows):
@@ -753,7 +831,7 @@ class Display(tk.Tk):
                     j >= self.board.ncols - self.board.corner)):
                     colour = 'black'
 
-                self.canvas.create_rectangle(i*self.s_width,
+                self.board_canvas.create_rectangle(i*self.s_width,
                         j*self.s_height, (i+1)*self.s_width,
                         (j+1)*self.s_height, fill = colour)
         
@@ -768,7 +846,7 @@ class Display(tk.Tk):
             pos_x = (square.file_ - 0.5) * self.s_height
             pos_y = (self.board.nrows + 0.5 - square.rank) * self.s_width
 
-            text = self.canvas.create_text(pos_x, pos_y,
+            text = self.board_canvas.create_text(pos_x, pos_y,
                 text = PIECE_INFO[piece.name]['unicode'], 
                 fill = piece.colour, font = (None, 35))
 
@@ -776,14 +854,14 @@ class Display(tk.Tk):
 
         self.piece_loc = piece_loc
 
-        self.canvas.bind('<ButtonPress-1>', self.pick_up)
-        self.canvas.bind('<B1-Motion>', self.drag)
+        self.board_canvas.bind('<ButtonPress-1>', self.pick_up)
+        self.board_canvas.bind('<B1-Motion>', self.drag)
 
-        self.canvas.bind('<ButtonRelease-1>', self.drop) 
+        self.board_canvas.bind('<ButtonRelease-1>', self.drop) 
 
     def pick_up(self, event):
    
-        object_id = self.canvas.find_closest(event.x, event.y, halo=0)[0]
+        object_id = self.board_canvas.find_closest(event.x, event.y, halo=0)[0]
 
         if object_id in self.piece_loc.keys():
             self.drag_piece = object_id
@@ -799,7 +877,7 @@ class Display(tk.Tk):
         delta_x = event.x - self.drag_x
         delta_y = event.y - self.drag_y
 
-        self.canvas.move(self.drag_piece, delta_x, delta_y)
+        self.board_canvas.move(self.drag_piece, delta_x, delta_y)
 
         self.drag_x = event.x
         self.drag_y = event.y
@@ -831,7 +909,7 @@ class Display(tk.Tk):
                 piece_delete = list(self.piece_loc.keys())[list(
                     self.piece_loc.values()).index(move_end)]
 
-                self.canvas.delete(piece_delete)
+                self.board_canvas.delete(piece_delete)
                 
                 self.piece_loc[piece_delete] = False
             except ValueError:
@@ -843,7 +921,29 @@ class Display(tk.Tk):
             pos_x = (index_init_x-0.5)*self.s_height
             pos_y = (index_init_y-0.5)*self.s_width
 
-        self.canvas.coords(self.drag_piece, (pos_x, pos_y))
+        self.board_canvas.coords(self.drag_piece, (pos_x, pos_y))
+        self.move_populate(self.board.move_list)
+
+    def move_populate(self, move_list):
+        if len(move_list) == 1:
+            prev_move_num = 0
+        else:
+            prev_move_num = move_list[-2].number
+
+        current_move = move_list[-1]
+        move_number = current_move.number
+        pgn_move = current_move.pgn
+        
+        num_clrs = len(COLOUR_INFO)
+        column = ((COLOUR_INFO.index(
+                        move_list[-1].colour)) %num_clrs)+1
+        
+        if move_number > prev_move_num:
+            tk.Label(self.tool_frame, text = move_number, width = 3).grid(
+                    column = 0, row = move_number - 1)
+        
+        tk.Label(self.tool_frame, text = pgn_move, width = 7).grid(
+                row = move_number - 1, column = column)
 
     def coords_to_index(self, x, y):
         index_x = np.ceil(x/self.s_width)
