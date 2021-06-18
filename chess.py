@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import string
 import tkinter as tk
 import time
+import pyperclip
 
 #Colours available in four player chess
 COLOUR_INFO = ['Red', 'Blue', 'Yellow', 'Green']
@@ -22,14 +23,18 @@ alphabet = string.ascii_lowercase
 #Creates class for chessboard
 class Board:
     #Default board is set as 14 rows/columns and with RBYG colours
-    def __init__(self, nrows = 14, ncols = 14, corner = 3, rules = True):
+    def __init__(self, nrows = 14, ncols = 14, corner = 3, rules = True,
+                prom_rank = 8):
         self.nrows = nrows
         self.ncols = ncols
         self.corner = corner
         self.colours = [colour for colour in COLOUR_INFO]
         self.rules = rules
+        self.prom_rank = prom_rank
+
         self.move_list = []
         self.king_loc = {}
+        self.piece_pos = {}
 
         self.board_init()
         self.piece_init()
@@ -67,6 +72,19 @@ class Board:
                             'Yellow'))
             self.piece_add(self.squares[3+i][13], Piece(piece_order[i], 
                             'Green'))
+
+        for colour in COLOUR_INFO:
+            if colour not in self.piece_pos:
+                self.piece_pos[colour] = []
+
+        for square in self.squares.ravel():
+            if square.piece == None:
+                continue
+            else:
+                piece = square.piece
+                temp_list = self.piece_pos[piece.colour]
+                temp_list.append(piece)
+                self.piece_pos[piece.colour] = temp_list
 
     #Finds square object based on board co-ords
     def square_find(self, square_code):
@@ -174,7 +192,7 @@ class Board:
                     
             #If reaches here then move is allowed to occur and is recorded
 
-            self.square_find(move_end).piece.moved = True
+            self.square_find(move_end).piece.last_move = move_end
             self.move_list.append(attempt_move)
             attempt_move.pgn_create(piece_start, old_piece, new_check)
             return True
@@ -452,7 +470,8 @@ class Board:
         return king_checks
 
     #Returns list of pieces in hori/verti/diag line of sight of king
-    def hori_verti_diag_extent(self, move_code):
+    def hori_verti_diag_extent(self, move_code, extent_type = 'all',
+                                include_gap = False):
 
         #list of piece in line of sight (los)
         los_list = []
@@ -460,8 +479,14 @@ class Board:
         file_, rank = move_to_rank_file(move_code)
 
         #8 direction vectors for hori/verti/diag from king to loop over
-        loop_directions = [[-1, -1], [-1, 0], [-1, 1], [0, -1],
+        if extent_type == 'all':
+            loop_directions = [[-1, -1], [-1, 0], [-1, 1], [0, -1],
                             [0, 1], [1, -1], [1, 0], [1, 1]]
+        elif extent_type == 'hori':
+            loop_directions = [[-1, 0], [0, -1], [0, 1], [1, 0]]
+
+        elif extent_type == 'diag':
+            loop_directions = [[-1, -1], [-1, 1], [1, -1], [1, 1]]
 
         for idx, val in enumerate(loop_directions):
             f_index = file_ - 1 
@@ -490,15 +515,21 @@ class Board:
                     los = 0
                     pass
 
+                if include_gap and los == False:
+                    los_list.append(self.squares[r_index][f_index].name)
+
                 #if obstruct = False or True then no piece obstruction found
                 #booleans are counted as integers in isinstance
                 if not isinstance(los, int):
                     stop = True
-                    los_list.append(los)
+                    if include_gap:
+                        los.list.append(los.loc)
+                    else:
+                        los_list.append(los)
                 
         return los_list
 
-    def knight_extent(self, move_code):
+    def knight_extent(self, move_code, start_square = False):
         knight_list = []
 
         file_, rank = move_to_rank_file(move_code)
@@ -515,9 +546,13 @@ class Board:
                 continue
 
             knight_check = self.squares[r_index][f_index].obstruct()
-            if not isinstance(knight_check, int):
-                if knight_check.name == 'Knight':
-                    knight_list.append(knight_check)
+            if start_square:
+                if not knight_check:
+                    knight_list.append(self.squares[r_index][f_index].name)
+            else:
+                if not isinstance(knight_check, int):
+                    if knight_check.name == 'Knight':
+                        knight_list.append(knight_check)
 
         return knight_list
 
@@ -627,6 +662,67 @@ class Board:
 
         return True
 
+    def stalemate_test(self):
+        #Knight_extent -> all knight moves
+        #Hori_verti_diag_extent -> all rook/bishop/queen moves
+        #King_extent -> trivial 
+        #Need to write something for pawns extent
+        
+        for colour in self.colours:
+            stop = False
+            for piece in self.piece_pos[colour]:
+                if piece.loc == None:
+                    continue
+                if stop:
+                    continue
+
+                pos = piece.loc
+
+                if piece.name == 'Rook':
+                    moves = self.hori_verti_diag_extent(pos, 
+                            extent_type = 'hori', include_gap = True)
+                    
+                if piece.name == 'Queen':
+                    moves = self.hori_verti_diag_extent(pos,
+                            extent_type = 'all', include_gap = True)
+
+                if piece.name == 'King':
+                    file_, rank = move_to_rank_file(pos)
+                    
+                    move_direct = [[-1, -1], [-1, 0], [-1, 1], [0, -1],
+                                    [0, 1], [1, -1], [1, 0], [1, 1]]
+
+                    moves = []
+                    for idx, val in enumerate(move_direct):
+                        f_index = file_ - 1 + val[0]
+                        r_index = rank - 1 + val[1]
+                        
+                        if (f_index < 0 or f_index > self.ncols - 1 or
+                            r_index < 0 or r_index > self.nrows - 1):
+                            continue
+                        move_end = self.squares[r_index][f_index].name
+                        moves.append(move_end)
+
+                if piece.name == 'Pawn':
+                    move = []
+                if piece.name == 'Bishop':
+                    moves = self.hori_verti_diag_extent(pos,
+                            extent_type = 'diag', include_gap = True)
+
+                if piece.name == 'Knight':
+                    moves = self.knight_extent(pos, start_square = True)
+
+                for move_end in moves:
+                    move_test = self.move(pos, move_end, dummy = True)
+                    
+                    if move_test == False:
+                        continue
+                    if not colour in checked_checks:
+                        stop = True
+            
+            if not stop:
+                print('{} is stalemated'.format(colour))
+                
     #Add piece to a square and updates data on king locations
     def piece_add(self, square, piece):
         square.add_piece(piece)
@@ -659,6 +755,7 @@ class Square:
         self.piece = piece
 
     def remove_piece(self):
+        self.piece.loc = None
         self.piece = None
     #converts rank/file variables into corresponding required position on
     #board. 0.2 is arbitary value found through testing and should center
@@ -715,6 +812,9 @@ class Move:
             check_string = ''
         
         self.pgn = start_string + middle + end_string + check_string
+
+        self.display = (PIECE_INFO[piece_start.name]['symbol'] + self.end +
+                        check_string)
         print(self.pgn)
 
 class Display(tk.Tk):
@@ -733,7 +833,8 @@ class Display(tk.Tk):
         self.s_height = self.board_height/self.board.nrows
 
         self.display_init()
-        self.display()
+        self.board_init()
+        self.piece_init()
 
     def display_init(self):
         self.frame = tk.Frame(self)
@@ -763,7 +864,7 @@ class Display(tk.Tk):
         self.col_4.grid(column = 3, row = 1)
 
     def tools_init(self):
-        self.tools = tk.Canvas(self.frame, background = 'red', width = 300,
+        self.tools = tk.Canvas(self.frame, background = 'white', width = 300,
             height = self.board_height, highlightthickness = 0)
         self.tools.grid(column = 4, row = 1)
 
@@ -789,24 +890,92 @@ class Display(tk.Tk):
             width = 300, height = 25, highlightthickness = 0)
         self.tool_options.grid(row = 2, column = 4)
 
-        self.move_but = tk.Button(self.tool_options, text = 'Moves',
-                width = 5, height = 1)
-        self.move_but.pack(side = 'left')
-
         self.new_but = tk.Button(self.tool_options, text = 'New game',
-                width = 5, height = 1)
+                width = 5, height = 1, command = self.new_game)
         self.new_but.pack(side = 'left')
 
         self.save_but = tk.Button(self.tool_options, text = 'Save',
-                width = 5, height = 1)
+                width = 5, height = 1, command = self.save_game)
         self.save_but.pack(side = 'left')
 
         self.load_but = tk.Button(self.tool_options, text = 'Load',
-                width = 5, height = 1)
+                width = 5, height = 1, command = self.load_game)
         self.load_but.pack(side = 'left')
 
     def toolconfig(self, event):
         self.tools.configure(scrollregion = self.tool_frame.bbox('all'))
+
+    def new_game(self):
+        new_game_win = tk.Toplevel()
+        
+        new_warning_text = tk.Label(new_game_win, text = ('Are you sure '+
+            'you want to reset the board?'))
+        new_warning_text.pack(fill = 'x', side = 'top')
+
+        game_reset = tk.Button(new_game_win, text = 'Reset', 
+                command = lambda: [self.reset(), self.piece_init()])
+        game_reset.pack(side = 'left')
+
+        game_reset_cancel = tk.Button(new_game_win, text = 'Cancel',
+                command = lambda: new_game_win.destroy())
+        game_reset_cancel.pack(side = 'right')
+        
+
+    def save_game(self):
+        move_list = self.board.move_list
+        
+        moves_str = ''
+
+        for move in move_list:
+            if move.colour == self.board.colours[0]:
+                moves_str = moves_str + str(move.number) + '. '
+            moves_str = moves_str + move.pgn
+
+            if move.colour != self.board.colours[-1]:
+                moves_str = moves_str + ' .. '
+            else:
+                moves_str = moves_str + '\n'
+
+        win = tk.Toplevel()
+        win.geometry('600x600')
+
+        save_text = tk.Text(win)
+        save_text.grid(row = 0, column = 0, sticky = 'nsew')
+        save_text.insert(tk.END, moves_str)
+
+        save_text_but = tk.Button(win, text = 'Copy to clipboard',
+                command = lambda: pyperclip.copy(moves_str))
+        save_text_but.grid(row = 1, column = 0)
+
+        win.grid_columnconfigure(0, weight=1)
+        win.grid_rowconfigure(0, weight=1)
+    
+    def load_game(self):
+        win = tk.Toplevel()
+        win.geometry('600x600')
+
+        self.load_text = tk.Text(win)
+        self.load_text.grid(row = 0, column = 0, sticky='nsew')
+
+        load_game_but = tk.Button(win, text = 'Load game', 
+                command = self.retrieve_load)
+        load_game_but.grid(row = 1, column = 0)
+
+        win.grid_columnconfigure(0, weight=1)
+        win.grid_rowconfigure(0, weight=1)
+
+    def reset(self):
+        self.board = Board()
+        for obj_number in self.piece_loc.keys():
+            self.board_canvas.delete(obj_number)
+                
+        for label_object in self.tool_frame.winfo_children():
+            print(label_object)
+            label_object.destroy()
+
+    def retrieve_load(self):
+        self.load_pgn(self.load_text.get('1.0', 'end-1c'))
+        return
 
     def rank_file_labels(self):
         self.file_labels = tk.Canvas(self.frame, width = self.board_width,
@@ -816,9 +985,8 @@ class Display(tk.Tk):
             height = self.board_height, highlightthickness = 0)
         self.rank_labels.grid(column = 1, row = 1)
 
-    def display(self):
+    def board_init(self):
         
-        piece_loc = {}
         for i in range(self.board.nrows):
             for j in range(self.board.ncols):
                 if (i + j)%2 == 0:
@@ -837,6 +1005,13 @@ class Display(tk.Tk):
         
         #Checks if square has piece and if it does then plots it with 
         #respective symbol
+
+        self.board_canvas.bind('<ButtonPress-1>', self.pick_up)
+        self.board_canvas.bind('<B1-Motion>', self.drag)
+        self.board_canvas.bind('<ButtonRelease-1>', self.drop) 
+
+    def piece_init(self):
+        piece_loc = {}
         for square in self.board.squares.ravel():
             if square.piece == None:
                 continue
@@ -853,11 +1028,6 @@ class Display(tk.Tk):
             piece_loc[text] = piece.loc
 
         self.piece_loc = piece_loc
-
-        self.board_canvas.bind('<ButtonPress-1>', self.pick_up)
-        self.board_canvas.bind('<B1-Motion>', self.drag)
-
-        self.board_canvas.bind('<ButtonRelease-1>', self.drop) 
 
     def pick_up(self, event):
    
@@ -916,13 +1086,13 @@ class Display(tk.Tk):
                 pass
 
             self.piece_loc[self.drag_piece] = move_end
+            self.move_populate(self.board.move_list)
 
         else:
             pos_x = (index_init_x-0.5)*self.s_height
             pos_y = (index_init_y-0.5)*self.s_width
 
         self.board_canvas.coords(self.drag_piece, (pos_x, pos_y))
-        self.move_populate(self.board.move_list)
 
     def move_populate(self, move_list):
         if len(move_list) == 1:
@@ -932,17 +1102,17 @@ class Display(tk.Tk):
 
         current_move = move_list[-1]
         move_number = current_move.number
-        pgn_move = current_move.pgn
+        display_move = current_move.display
         
         num_clrs = len(COLOUR_INFO)
         column = ((COLOUR_INFO.index(
                         move_list[-1].colour)) %num_clrs)+1
         
         if move_number > prev_move_num:
-            tk.Label(self.tool_frame, text = move_number, width = 3).grid(
+            tk.Label(self.tool_frame, text = move_number, width = 2).grid(
                     column = 0, row = move_number - 1)
         
-        tk.Label(self.tool_frame, text = pgn_move, width = 7).grid(
+        tk.Label(self.tool_frame, text = display_move, width = 6).grid(
                 row = move_number - 1, column = column)
 
     def coords_to_index(self, x, y):
@@ -955,6 +1125,41 @@ class Display(tk.Tk):
         rank = round(self.board.nrows + 1 - index_y)
         move_code = alphabet[file_-1] + '{}'.format(rank)
         return move_code
+
+    def pgn_to_moves(self, pgn):
+        if len(pgn) == 1:
+            return 0, 0 
+        move_split = pgn.split('+')
+        move_split = move_split[0].split('x')
+
+        if len(move_split) == 1:
+            move_split = move_split[0].split('-')
+
+        for idx, string in enumerate(move_split):
+            if string[0].isupper():
+                move_split[idx] = string[1:]
+        return move_split[0], move_split[1]
+
+    def load_pgn(self, pgn_code):
+        move_text = pgn_code.split('\n1. ', 1)[1]
+        move_num_split = move_text.split('\n')
+        
+        move_list = []
+
+        self.reset()
+
+        for idx, line in enumerate(move_num_split): 
+            if idx != 0:
+                print(line)
+                line = line.split(' ', 1)[1]
+            move_number = idx + 1
+            moves = line.split(' .. ')
+            for pgn in moves:
+                move_start, move_end = self.pgn_to_moves(pgn)
+                self.board.move(move_start, move_end)
+                self.move_populate(self.board.move_list)
+
+        self.piece_init()
 
 def move_to_rank_file(move_name):
     file_letter = move_name[0]
