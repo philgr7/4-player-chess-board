@@ -10,12 +10,12 @@ COLOUR_INFO = ['Red', 'Blue', 'Yellow', 'Green']
 
 #List of available pieces with point value and corresponding unicode 
 PIECE_INFO = {
-            'Pawn': {'value': 1, 'unicode': '\u265F', 'symbol': ''},
-            'Knight': {'value': 3, 'unicode': '\u265E', 'symbol': 'N'},
-            'Bishop': {'value': 5, 'unicode': '\u265D', 'symbol': 'B'},
-            'Rook': {'value': 5, 'unicode': '\u265C', 'symbol': 'R'},
-            'Queen': {'value': 9, 'unicode': '\u265B', 'symbol': 'Q'},
-            'King': {'value': 20, 'unicode': '\u265A', 'symbol': 'K'}
+        'Pawn': {'value': 1, 'unicode': '\u265F', 'symbol': '', 'FEN': 'P'},
+        'Knight': {'value': 3, 'unicode': '\u265E', 'symbol': 'N', 'FEN': 'N'},
+        'Bishop': {'value': 5, 'unicode': '\u265D', 'symbol': 'B', 'FEN': 'B'},
+        'Rook': {'value': 5, 'unicode': '\u265C', 'symbol': 'R', 'FEN': 'R'},
+        'Queen': {'value': 9, 'unicode': '\u265B', 'symbol': 'Q', 'FEN': 'Q'},
+        'King': {'value': 20, 'unicode': '\u265A', 'symbol': 'K', 'FEN': 'K'}
         }
 
 alphabet = string.ascii_lowercase
@@ -28,19 +28,24 @@ class Board:
         self.nrows = nrows
         self.ncols = ncols
         self.corner = corner
-        self.colours = [colour for colour in COLOUR_INFO]
-        self.to_play = COLOUR_INFO[0]
         self.rules = rules
         self.prom_rank = prom_rank
+        
+        self.colours = [colour for colour in COLOUR_INFO]
+        self.to_play = COLOUR_INFO[0]
+        self.half_moves = 0
 
         #Stores move objects, king_piece objects, piece objects and square 
         #objects respectively
-        self.move_list = []
         self.king_loc = {}
         self.scores = {}
+        self.king_castle = {}
+        self.queen_castle = {}
         self.piece_pos = {}
         self.capture_list = {}
+        
         self.squares = np.empty((self.nrows, self.ncols), dtype = 'object')
+        self.move_list = []
 
         self.board_init()
         self.colour_init()
@@ -62,6 +67,8 @@ class Board:
                 self.piece_pos[colour] = []
                 self.capture_list[colour] = []
                 self.scores[colour] = 0
+                self.king_castle[colour] = 1
+                self.queen_castle[colour] = 1
 
         #Initialise data for all pieces on board - assumed default piece
         #config if not stated otherwise which is defined 
@@ -78,14 +85,59 @@ class Board:
             self.piece_add(self.squares[10-i][0], Piece(pce_ord[i], 'Blue'))
             self.piece_add(self.squares[13][3+i], Piece(pce_ord[i], 'Yellow'))
             self.piece_add(self.squares[3+i][13], Piece(pce_ord[i], 'Green'))
+        
+        self.piece_pos_init()
 
+    def piece_fen_init(self, fen_board):
+        self.piece_pos = {}
+        self.colour_init()
+        if fen_board[:1] == '\n':
+            fen_board = fen_board[1:]
+        fen_rows = fen_board.split('/\n')
+        fen_rows = fen_rows[::-1]
+
+        fen_colour = {'r': 'Red', 'b': 'Blue', 'y': 'Yellow', 'g': 'Green'}
+        piece_abr = {}
+
+        for key, val in PIECE_INFO.items():
+            piece_abr[val['FEN']] = key
+
+        if len(fen_rows) != self.nrows:
+            print("FEN format doesn't match board format")
+
+        space_counter = 0
+        for i in range(self.nrows):
+            row_list = fen_rows[i].split(',')
+            for j in range(self.ncols):
+                if space_counter > 0:
+                    space_counter = space_counter - 1
+                    continue
+                else:
+                    next_square = row_list.pop(0)
+                    try:
+                        next_square = int(next_square)
+                    except ValueError:
+                        pass
+                if isinstance(next_square, int):
+                    space_counter = next_square - 1
+                    continue
+                piece_colour = fen_colour[next_square[0]]
+                piece_name = piece_abr[next_square[1]]
+                self.piece_add(self.squares[i][j], Piece(piece_name, piece_colour))
+                
+        self.piece_pos_init(start_square_info = False)
+
+    def piece_pos_init(self, start_square_info = True):
         for square in self.squares.ravel():
             piece = square.piece
             if piece == None:
                 continue
             elif square.piece == 'King':
-                self.king_loc[piece.colour].append(piece)
+                self.king_loc[piece.colour].append(piece.loc)
+            
             self.piece_pos[piece.colour].append(piece)
+            if not start_square_info:
+                piece.start_square = None
 
     #After a move is requested if rules is turned on then a check is done
     #for legality and the move is applied and stored
@@ -134,7 +186,6 @@ class Board:
 
         self.board_move(start_square, end_square)
         
-        new_check = 0 #counter for how many new_checks are given
         #If rules on all kings are checked for whether in check
         if self.rules:
             king_checks = self.all_check_test()
@@ -145,8 +196,6 @@ class Board:
         if dummy:
             self.board_move_undo(start_square, end_square, old_piece)    
             return king_checks
-
-        print(king_checks)
 
         #Either invalid move or does mate check based on king_col being checked
         for king_col, king_check_list in king_checks.items():
@@ -170,7 +219,7 @@ class Board:
         self.stalemate_test()
         #If reaches here then move is allowed to occur and is recorded
 
-        end_square.last_move = move_end
+        end_square.last_move = attempt_move
         self.move_list.append(attempt_move)
         attempt_move.pgn_create(piece_start, old_piece, new_checks)
         
@@ -180,7 +229,6 @@ class Board:
 
     #Confirms the status of all kings for checks
     def all_check_test(self):
-        print(self.king_loc)
 
         check_list = {}
         for key in self.king_loc:
@@ -203,7 +251,6 @@ class Board:
             sub_set = set(checks_list).issubset(set(prev_move_checks[king_col]))
             if not sub_set:
                 new_checks = new_checks + 1
-        print(new_checks)
         return new_checks
 
     #Find pieces in hori/verti/diag line of sight of a king as well as 
@@ -217,7 +264,6 @@ class Board:
         move_end = king_loc
         for idx, piece in enumerate(check_pieces):
             move_start = piece.loc
-            print(move_start, piece.name, piece.colour)
             colour = piece.colour
             if colour == king_col:
                 continue
@@ -328,7 +374,7 @@ class Board:
         c, s = round(np.cos(theta)), round(np.sin(theta))
 
         #Arrays cover moving forward and capturing on either diagonal
-        rank_start, file_start = move_to_rank_file(move_code)
+        file_start, rank_start = move_to_rank_file(move_code)
         
         forward = np.array([c,s])
         diag_1 = np.array([c-s, s-c])
@@ -338,13 +384,13 @@ class Board:
 
         for move in move_differ:
             rank_end = rank_start + move[0]
-            file_end = rank_end + move[1]
-            move_end = rank_file_to_move(rank_end, file_end)
-
-            move_list.append(move_end)
+            file_end = file_start + move[1]
+            move_end = rank_file_to_move(file_end, rank_end)
+            print(move_code, move_end)
+            if self.square_find(move_end).obstruct() != True:
+                move_list.append(move_end)
 
         return move_list
-
 
     #Checks if king is mated - 3 checks: if double check then king has to
     #move/capture something, if single check then either capture attacking
@@ -425,8 +471,6 @@ class Board:
 
         max_diff = max(abs(diff_f), abs(diff_r))
 
-        print(max_diff, r_step, f_step)
-
         for i in range(1, max_diff):
             r_index = r_start + i*r_step
             f_index = f_start + i*f_step
@@ -438,13 +482,11 @@ class Board:
             obstr_pieces = (self.hori_verti_diag_extent(obstr_loc) + 
                                 self.knight_extent(obstr_loc))
 
-            print(obstr_pieces, obstr_loc)
             for piece in obstr_pieces:
                 if piece.colour != king_col:
                     continue
                 move_start = piece.loc
                 checked_checks = self.move(move_start, obstr_loc, dummy = True)
-                print(checked_checks)
                 if checked_checks == False:
                     continue
                 if not king_col in checked_checks:
@@ -504,7 +546,7 @@ class Board:
 
                 for move_end in moves:
                     move_test = self.move(pos, move_end, dummy = True)
-                    
+                    print(move_test, pos, move_end, piece.name)                    
                     if move_test == False:
                         continue
                     if not colour in move_test:
@@ -544,6 +586,46 @@ class Board:
             file_, rank = move_to_rank_file(square_code)
             return self.squares[rank-1][file_-1]
 
+    def board_pos_fen(self):
+        empty_count = 0
+        fen_string = ''
+        for i in range(self.nrows):
+            row_info = []
+            for j in range(self.ncols):
+                piece = self.squares[i][self.ncols-1-j].piece
+                if piece is None:
+                    empty_count = empty_count + 1
+                else:
+                    if empty_count > 0:
+                        row_info.append(str(empty_count))
+                    row_info.append(piece.fen)
+            if empty_count > 0:
+                row_info.append(str(empty_count))
+            fen_string = fen_string + ','.join(row_info) + '/\n'
+        return fen_string
+
+    def fen_to_board(self, fen):
+        fen_list = fen.split('-')
+
+        letter_to_clr = {'R': 'Red', 'B': 'Blue', 'Y': 'Yellow', 'G': 'Green'}
+
+        self.to_play = letter_to_clr[fen_list[0]]
+        in_game = [int(x) for x in fen_list[1].split(',')] 
+        king_castle = [int(x) for x in fen_list[2].split(',')]
+        queen_castle = [int(x) for x in fen_list[3].split(',')]
+        scores = [int(x) for x in fen_list[4].split(',')]
+
+        self.half_moves = int(fen_list[5])
+
+        for idx, clr in enumerate(COLOUR_INFO):
+            if in_game[idx] == 1:
+                self.colours.append(clr)
+            self.king_castle[clr] = king_castle[idx]
+            self.queen_castle[clr] = queen_castle[idx]
+            self.scores[clr] = scores[idx]
+
+        self.piece_fen_init(fen_list[6])
+
 #Creates class for a chess piece
 class Piece:
 
@@ -553,10 +635,14 @@ class Piece:
         self.value = PIECE_INFO[name]['value']
         self.last_move = last_move
 
-        self.loc = 0
-
+        self.start_square = None
+        self.loc = None
         self.direction = COLOUR_INFO.index(colour)
-
+    
+    def fen_code(self):
+        lower(colour[0])
+        return lower(colour[0]) + PIECE_INFO[name]['FEN']
+    
 class Square:
     def __init__(self, rank, file_, blocked = False):
         self.rank = rank
@@ -571,14 +657,6 @@ class Square:
 
     def remove_piece(self):
         self.piece = None
-    #converts rank/file variables into corresponding required position on
-    #board. 0.2 is arbitary value found through testing and should center
-    #the piece in its respective square
-    def coord_to_position(self, type_, n_extent):
-        if type_ == 'file':
-            return (0.2+2*(self.file_-1)) / (2*n_extent)
-        if type_ == 'rank':
-            return (0.2+2*(self.rank-1)) / (2*n_extent)
 
     def obstruct(self):
         if self.blocked == False and self.piece == None:
@@ -609,7 +687,7 @@ class Move:
     def f_diff(self):
         return self.f_end - self.f_start
 
-    def pgn_create(self, piece_start, piece_end, check):
+    def pgn_create(self, piece_start, piece_end, checks):
         
         start_string = PIECE_INFO[piece_start.name]['symbol'] + self.start
 
@@ -620,11 +698,8 @@ class Move:
             middle = 'x'
             end_string = PIECE_INFO[piece_end.name]['symbol'] + self.end
 
-        if check:
-            check_string = '+'
-        else:
-            check_string = ''
-        
+        check_string = '+'*checks
+
         self.pgn = start_string + middle + end_string + check_string
 
         self.display = (PIECE_INFO[piece_start.name]['symbol'] + self.end +

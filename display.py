@@ -157,11 +157,15 @@ class Display(tk.Tk):
         win.geometry('600x600')
 
         self.load_text = tk.Text(win)
-        self.load_text.grid(row = 0, column = 0, sticky='nsew')
+        self.load_text.pack(side = 'top', fill = tk.Y, expand = 1)
 
-        load_game_but = tk.Button(win, text = 'Load game', 
-                command = self.retrieve_load)
-        load_game_but.grid(row = 1, column = 0)
+        load_game_pgn_but = tk.Button(win, text = 'Load PGN4', 
+                command = self.comm_load_pgn)
+        load_game_pgn_but.pack(side = 'bottom')
+
+        load_game_fen_but = tk.Button(win, text = 'Load FEN4',
+                command = self.comm_load_fen)
+        load_game_fen_but.pack(side = 'bottom')
 
         win.grid_columnconfigure(0, weight=1)
         win.grid_rowconfigure(0, weight=1)
@@ -172,11 +176,15 @@ class Display(tk.Tk):
             self.board_canvas.delete(obj_number)
                 
         for label_object in self.tool_frame.winfo_children():
-            print(label_object)
             label_object.destroy()
 
-    def retrieve_load(self):
+    def comm_load_pgn(self):
         self.load_pgn(self.load_text.get('1.0', 'end-1c'))
+        return
+
+    def comm_load_fen(self):
+        self.load_fen(self.load_text.get('1.0', 'end-1c'))
+        self.board.fen_to_board(self.load_text.get('1.0', 'end-1c'))
         return
 
     def rank_file_labels(self):
@@ -362,13 +370,35 @@ class Display(tk.Tk):
                 self.move_populate(self.board.move_list)
 
         self.piece_init()
+        
+    def load_fen(self, fen_code):
+        self.reset()
+        self.board.fen_to_board(fen_code)
+        self.piece_init()
 
-    def fen_to_board(self):
-        #colour-,,,-,,,-,,,-,,,--3, yR, yN, yB,
-        print('non')    
-    
     def board_to_fen(self):
-        print('non')
+        fen = ''
+
+        fen = fen + self.board.to_move + '-'
+        
+        in_game = []
+        king_castle = []
+        queen_castle = []
+        score = []
+
+        for clr in COLOUR_INFO:
+            if clr in self.board.colours:
+                in_game.append(str(1))
+            else:
+                in_game.append(str(0))
+            king_castle.append(str(self.board.king_castle[clr]))
+            queen_castle.append(str(self.board.queen_castle[clr]))
+            score.append(str(self.board.scores[clr]))
+
+        fen = (fen + ','.join(in_game) + '-' + '.'.join(king_castle) + '-' +
+                ','.join(queen_castle) + '-' + '.'.join(score) + '-')
+
+        fen = fen + self.half_moves + '-' + self.board.board_pos_fen()
 
 def move_to_rank_file(move_name):
     file_letter = move_name[0]
