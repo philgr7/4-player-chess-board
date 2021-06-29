@@ -24,12 +24,12 @@ alphabet = string.ascii_lowercase
 class Board:
     #Default board is set as 14 rows/columns and with RBYG colours
     def __init__(self, nrows = 14, ncols = 14, corner = 3, rules = True,
-                prom_rank = 8):
+                prom_rf = 8):
         self.nrows = nrows
         self.ncols = ncols
         self.corner = corner
         self.rules = rules
-        self.prom_rank = prom_rank
+        self.prom_rf = prom_rf
         
         self.colours = [colour for colour in COLOUR_INFO]
         self.to_play = COLOUR_INFO[0]
@@ -206,7 +206,7 @@ class Board:
             else:
                 mate_test = self.test_mate(king_check_list, king_col)
                 if mate_test:
-                    print('Checkmate')
+                    print('{} is checkmated!'.format(king_col))
     
         #Confirm whether move caused a new check
         if king_checks:
@@ -218,14 +218,69 @@ class Board:
 
         self.stalemate_test()
         #If reaches here then move is allowed to occur and is recorded
+        self.move_updates(attempt_move, piece_start, old_piece, end_square, 
+                new_checks, colour)
 
-        end_square.last_move = attempt_move
+        return True
+
+    def move_updates(self, attempt_move, piece_start, old_piece, end_square, 
+            new_checks, clr):
+        end_square.piece.last_move = attempt_move
         self.move_list.append(attempt_move)
         attempt_move.pgn_create(piece_start, old_piece, new_checks)
         
-        col_idx = (self.colours.index(colour) + 1)% (len(self.colours))
+        col_idx = (self.colours.index(clr) + 1)% (len(self.colours))
         self.to_play = self.colours[col_idx]
-        return True
+
+        if piece_start.promoted == 'Temp':
+            piece_start.promoted = True
+
+        bonus_score = 0
+        if new_checks == 2:
+            if piece_start.name == 'Queen':
+                bonus_score = 1
+            else:
+                bonus_score = 5
+        elif new_checks == 3:
+            if piece_start.name == 'Queen':
+                bonus_score = 5
+            else:
+                bonus_score = 20
+        elif new_checks > 3:
+            print('ERROR - MORE THAN 3 CHECKS DETECTED')
+
+        if old_piece:
+            self.scores[clr] = self.scores[clr] + old_piece.value + bonus_score 
+
+    def promote_check(self, piece, square_code):
+        #in board move, want true if pawn with prom_rf = piece_rf, 
+        #in undo want true if piece.promoted = temp
+        #in drop want true if newly promoted queen <- get around it 
+        #check end square and put 1 over queen to indicate 1 point
+        if piece.promoted == 'Temp':
+            return True
+        if piece.name != 'Pawn':
+            return False
+    
+        file_, rank = move_to_rank_file(square_code)
+        theta = np.radians(90*piece.direction)
+        c, s = round(np.cos(theta)), round(np.sin(theta))
+
+        if c > 0.5:
+            prom_rf = self.prom_rf*c
+            piece_rf = rank
+        elif c < -0.5:
+            prom_rf = self.nrows + self.prom_rf*c + 1
+            piece_rf = rank
+        elif s > 0.5:
+            prom_rf = self.prom_rf*s
+            piece_rf = file_
+        elif s < -0.5:
+            prom_rf = self.ncols + self.prom_rf*s + 1
+            piece_rf = file_
+
+        if prom_rf == piece_rf:
+            return True
 
     #Confirms the status of all kings for checks
     def all_check_test(self):
@@ -386,7 +441,6 @@ class Board:
             rank_end = rank_start + move[0]
             file_end = file_start + move[1]
             move_end = rank_file_to_move(file_end, rank_end)
-            print(move_code, move_end)
             if self.square_find(move_end).obstruct() != True:
                 move_list.append(move_end)
 
@@ -546,7 +600,6 @@ class Board:
 
                 for move_end in moves:
                     move_test = self.move(pos, move_end, dummy = True)
-                    print(move_test, pos, move_end, piece.name)                    
                     if move_test == False:
                         continue
                     if not colour in move_test:
@@ -562,6 +615,12 @@ class Board:
             self.king_loc[piece.colour] = piece.loc
 
     def board_move(self, start_square, end_square):
+        promotion = self.promote_check(start_square.piece, end_square.name)
+
+        if promotion:
+           start_square.piece.promoted = 'Temp'
+           start_square.piece.name = 'Queen'
+
         if end_square.piece != None:
             end_square.piece.loc = None
             self.capture_list[self.to_play].append(end_square.piece)
@@ -572,13 +631,19 @@ class Board:
             self.king_loc[end_square.piece.colour] = end_square.piece.loc
 
     def board_move_undo(self, start_square, end_square, old_piece):
+        promotion = self.promote_check(end_square.piece, end_square.name)
+
+        if promotion:
+            end_square.piece.promoted = False
+            end_square.piece.name = 'Pawn'
+
         start_square.add_piece(end_square.piece)
         if old_piece != None:
             end_square.add_piece(old_piece)
             del self.capture_list[self.to_play][-1]
         else:
-            end_square.remove_piece()
-        
+            end_square.remove_piece() 
+
         if start_square.piece.name == 'King':
             self.king_loc[start_square.piece.colour] = start_square.piece.loc
 
@@ -638,7 +703,8 @@ class Piece:
         self.start_square = None
         self.loc = None
         self.direction = COLOUR_INFO.index(colour)
-    
+        self.promoted = False
+
     def fen_code(self):
         lower(colour[0])
         return lower(colour[0]) + PIECE_INFO[name]['FEN']
@@ -680,6 +746,7 @@ class Move:
         self.end = end
         self.f_end, self.r_end = move_to_rank_file(self.end)
         self.checks = {}
+        self.castle = False
 
     def r_diff(self):
         return self.r_end - self.r_start

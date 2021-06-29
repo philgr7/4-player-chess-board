@@ -52,18 +52,70 @@ class Display(tk.Tk):
         self.rank_file_labels()
 
     def colour_init(self):
-        self.col_1 = tk.Canvas(self.frame, background = 'white', height = 100,
-            width = self.board_width, highlightthickness = 0)
-        self.col_1.grid(column = 2, row = 3)
-        self.col_2 = tk.Canvas(self.frame, background = 'white', width = 100,
-            height = self.board_height, highlightthickness = 0)
-        self.col_2.grid(column = 0, row = 1)
-        self.col_3 = tk.Canvas(self.frame, background = 'white', height = 100,
-            width = self.board_width, highlightthickness = 0)
-        self.col_3.grid(column = 2, row =0)
-        self.col_4 = tk.Canvas(self.frame, background = 'white', width = 100,
-                height = self.board_height, highlightthickness = 0)
-        self.col_4.grid(column = 3, row = 1)
+        self.score_displays = {}
+        self.clr_1 = self.clr_dis(self.frame, COLOUR_INFO[0], 
+                90, self.board_width, 2, 3)
+        self.clr_2 = self.clr_dis(self.frame, COLOUR_INFO[1], 
+                self.board_height, 90, 0, 1)
+        self.clr_3 = self.clr_dis(self.frame, COLOUR_INFO[2], 
+                90, self.board_width, 2, 0)
+        self.clr_4 = self.clr_dis(self.frame, COLOUR_INFO[3], 
+                self.board_height, 90, 3, 1)
+        self.cap_update_all()
+        
+    def clr_dis(self, root, colour, height, width, col, row):
+        clr_frame = tk.Frame(root, height = height, width = width)
+        clr_frame.grid(column = col, row = row)
+        score_disp = tk.Label(clr_frame, text = self.board.scores[colour],
+                fg = colour, font = (None, 40))
+        if height > width:
+            cap_disp = tk.Canvas(clr_frame, highlightthickness = 0,
+                    width = width, bg = 'white')
+            score_disp.pack(side = 'top', expand = 0)
+            cap_disp.pack(side = 'top', fill = 'y', expand = 1)
+        else:
+            cap_disp = tk.Canvas(clr_frame, highlightthickness = 0,
+                    height = height, bg = 'white')
+            score_disp.pack(side = 'left', expand = 0)
+            cap_disp.pack(side = 'left', fill = 'x', expand = 1)
+
+        self.score_displays[colour] = score_disp
+        return cap_disp
+            
+    def cap_update_all(self):
+        self.cap_piece_update(self.clr_1, COLOUR_INFO[0], 4, 0)
+        self.cap_piece_update(self.clr_2, COLOUR_INFO[1], 0, 4)
+        self.cap_piece_update(self.clr_3, COLOUR_INFO[2], 4, 0)
+        self.cap_piece_update(self.clr_4, COLOUR_INFO[3], 0, 4)
+
+    def cap_piece_update(self, disp, colour,  rows, cols):
+        cap_list = self.board.capture_list[colour]
+        disp.delete('all')
+        if len(cap_list) == 0:
+            return
+        if rows > 0:
+            cols = int(np.ceil(len(cap_list) / rows))
+            remainder = (rows - len(cap_list)) % rows
+            cap_dummy = cap_list + remainder * [False]
+            spacing = 90/rows
+        elif cols > 0:
+            rows = int(np.ceil(len(cap_list) / cols))
+            remainder = (cols - len(cap_list)) % cols
+            cap_dummy = cap_list + remainder * [False]
+            spacing = 90/cols
+        print(cap_dummy, len(cap_dummy))
+        cap_arr = np.reshape(cap_dummy, (rows, cols)) 
+        for i in range(rows):
+            for j in range(cols):
+                piece = cap_arr[i][j]
+                if not piece:
+                    continue
+                pos_x = 10+j*spacing
+                pos_y = 10+i*spacing
+                text = PIECE_INFO[piece.name]['unicode']
+                fill = piece.colour
+                disp.create_text(pos_x, pos_y, text = text, fill = fill, 
+                    font = (None, 20))
 
     def tools_init(self):
         self.tools = tk.Canvas(self.frame, background = 'white', width = 300,
@@ -89,7 +141,7 @@ class Display(tk.Tk):
 
     def tool_opt(self):
         self.tool_options = tk.LabelFrame(self.frame, background = 'white',
-            width = 300, height = 25, highlightthickness = 0)
+            width = 300, height = 15, highlightthickness = 0)
         self.tool_options.grid(row = 2, column = 4)
 
         self.new_but = tk.Button(self.tool_options, text = 'New game',
@@ -120,8 +172,7 @@ class Display(tk.Tk):
 
         game_reset_cancel = tk.Button(new_game_win, text = 'Cancel',
                 command = lambda: new_game_win.destroy())
-        game_reset_cancel.pack(side = 'right')
-        
+        game_reset_cancel.pack(side = 'right')        
 
     def save_game(self):
         move_list = self.board.move_list
@@ -188,12 +239,22 @@ class Display(tk.Tk):
         return
 
     def rank_file_labels(self):
-        self.file_labels = tk.Canvas(self.frame, width = self.board_width,
-            height = 25, highlightthickness = 0)
-        self.file_labels.grid(column = 2, row = 2)
-        self.rank_labels = tk.Canvas(self.frame, width = 25,
+        file_labels = tk.Canvas(self.frame, width = self.board_width,
+            height = 20, highlightthickness = 0)
+        file_labels.grid(column = 2, row = 2)
+        
+        alphabet = string.ascii_uppercase
+        files_ = list(alphabet[:self.board.ncols])
+        for idx, file_ in enumerate(files_):
+            file_labels.create_text((idx+0.5)*self.s_width, 5, text = file_)
+
+        rank_labels = tk.Canvas(self.frame, width = 20,
             height = self.board_height, highlightthickness = 0)
-        self.rank_labels.grid(column = 1, row = 1)
+        rank_labels.grid(column = 1, row = 1)
+       
+        for i in range(14, 0, -1):
+            rank_labels.create_text(10, self.board_height - (i-0.5)*self.s_height, 
+                    text = i)
 
     def board_init(self):
         
@@ -201,7 +262,7 @@ class Display(tk.Tk):
             for j in range(self.board.ncols):
                 if (i + j)%2 == 0:
                     colour = 'white'
-                else:
+                elif (i+j)%2 == 1:
                     colour = 'grey'
                 if ((i < self.board.corner or 
                     i >= self.board.nrows - self.board.corner) and
@@ -297,7 +358,15 @@ class Display(tk.Tk):
 
             self.piece_loc[self.drag_piece] = move_end
             self.move_populate(self.board.move_list)
+            for clr, score in self.board.scores.items():
+                self.score_displays[clr]['text'] = score
 
+            end_piece = self.board.square_find(move_end).piece
+            if end_piece.name == 'Queen' and end_piece.promoted == True:
+                self.board_canvas.itemconfig(self.drag_piece, 
+                        text = PIECE_INFO['Queen']['unicode'])
+
+            self.cap_update_all()
         else:
             pos_x = (index_init_x-0.5)*self.s_height
             pos_y = (index_init_y-0.5)*self.s_width
