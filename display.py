@@ -103,7 +103,6 @@ class Display(tk.Tk):
             remainder = (cols - len(cap_list)) % cols
             cap_dummy = cap_list + remainder * [False]
             spacing = 90/cols
-        print(cap_dummy, len(cap_dummy))
         cap_arr = np.reshape(cap_dummy, (rows, cols)) 
         for i in range(rows):
             for j in range(cols):
@@ -367,6 +366,11 @@ class Display(tk.Tk):
                         text = PIECE_INFO['Queen']['unicode'])
 
             self.cap_update_all()
+
+            castle_check = self.board.move_list[-1].castling
+            if castle_check:
+                self.castle_move(castle_check, end_piece)
+
         else:
             pos_x = (index_init_x-0.5)*self.s_height
             pos_y = (index_init_y-0.5)*self.s_width
@@ -394,6 +398,25 @@ class Display(tk.Tk):
         tk.Label(self.tool_frame, text = display_move, width = 6).grid(
                 row = move_number - 1, column = column)
 
+    def castle_move(self, castle_check, king_piece):
+        rook_start_square, rook_end_square = king_piece.rook_square(castle_check)
+                
+        rook_obj = list(self.piece_loc.keys())[list(
+            self.piece_loc.values()).index(rook_start_square)]
+        
+        file_end, rank_end = move_to_rank_file(rook_end_square)
+        index_x = file_end
+        index_y = self.board.nrows + 1 - rank_end
+            
+        pos_x = (index_x-0.5)*self.s_height
+        pos_y = (index_y-0.5)*self.s_width
+
+        print(index_x, index_y, pos_x, pos_y)
+
+        self.board_canvas.coords(rook_obj, (pos_x, pos_y))
+            
+        self.piece_loc[rook_obj] = rook_end_square
+
     def coords_to_index(self, x, y):
         index_x = np.ceil(x/self.s_width)
         index_y = np.ceil(y/self.s_height)
@@ -407,8 +430,14 @@ class Display(tk.Tk):
 
     def pgn_to_moves(self, pgn):
         if len(pgn) == 1:
-            return 0, 0 
+            return 0, 0
+        if pgn == 'O-O' or pgn == 'O-O-O':
+            print('castling')
+            return
+
         move_split = pgn.split('+')
+        move_split = move_split[0].split('=D')
+        move_split = move.split[0].split('#')
         move_split = move_split[0].split('x')
 
         if len(move_split) == 1:
@@ -437,8 +466,12 @@ class Display(tk.Tk):
                 move_start, move_end = self.pgn_to_moves(pgn)
                 self.board.move(move_start, move_end)
                 self.move_populate(self.board.move_list)
+        
+        for clr, score in self.board.scores.items():
+            self.score_displays[clr]['text'] = score
 
         self.piece_init()
+        self.cap_update_all()
         
     def load_fen(self, fen_code):
         self.reset()

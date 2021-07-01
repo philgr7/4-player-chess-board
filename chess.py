@@ -160,16 +160,24 @@ class Board:
                 move_number = self.move_list[-1].number + 1
             else:
                 move_number = self.move_list[-1].number
+            k_castle = self.king_castle[colour] 
+            q_castle = self.queen_castle[colour]
         else:
             colour = None
             move_number = 0
+            k_castle, q_castle = 0, 0
 
         #Creates Move object for testing that will be applied if success 
-        attempt_move = Move(move_number, colour, move_start, move_end)
+        attempt_move = Move(move_number, colour, move_start, move_end, k_castle,
+                q_castle)
 
         #If rules turned on, checks if legal move has been made
         if self.rules:
             move_check = attempt_move.legal_check(piece_start, self.squares, dummy)
+            if attempt_move.castling:
+                checked_castle = self.castle_checking(piece_start, attempt_move)
+                if not checked_castle:
+                    move_check = False
         else:
             move_check = True
  
@@ -185,7 +193,10 @@ class Board:
         old_piece = end_square.piece
 
         self.board_move(start_square, end_square)
-        
+
+        if attempt_move.castling:
+            self.castle_move(piece_start, attempt_move)
+
         #If rules on all kings are checked for whether in check
         if self.rules:
             king_checks = self.all_check_test()
@@ -220,7 +231,6 @@ class Board:
         #If reaches here then move is allowed to occur and is recorded
         self.move_updates(attempt_move, piece_start, old_piece, end_square, 
                 new_checks, colour)
-
         return True
 
     def move_updates(self, attempt_move, piece_start, old_piece, end_square, 
@@ -228,12 +238,31 @@ class Board:
         end_square.piece.last_move = attempt_move
         self.move_list.append(attempt_move)
         attempt_move.pgn_create(piece_start, old_piece, new_checks)
-        
         col_idx = (self.colours.index(clr) + 1)% (len(self.colours))
         self.to_play = self.colours[col_idx]
 
         if piece_start.promoted == 'Temp':
             piece_start.promoted = True
+            attempt_move.promoting = True
+
+        if piece_start.name == 'King':
+            self.king_castle[clr] = 0
+            self.queen_castle[clr] = 0
+
+        elif piece_start.name == 'Rook':
+            rook_type = piece_start.rook_type(self.king_loc[clr])
+            if rook_type == 'King':
+                self.king_castle[clr] = 0
+            elif rook_type == 'Queen':
+                self.queen_castle[clr] = 0
+        
+        if old_piece:
+            if old_piece.name == 'Rook':
+                rook_type = old_piece.rook_type(self.king_loc[old_piece.colour])
+                if rook_type == 'King':
+                    self.king_castle[old_piece.colour] = 0
+                elif rook_type == 'Queen':
+                    self.queen_castle[old_piece.colour] = 0
 
         bonus_score = 0
         if new_checks == 2:
@@ -308,6 +337,35 @@ class Board:
                 new_checks = new_checks + 1
         return new_checks
 
+    def castle_checking(self, piece, attempt_move):
+        
+        direct = piece.direction
+        theta = np.radians(90*direct)
+        c, s = round(np.cos(theta)), round(np.sin(theta))
+        r_step, f_step = s, c
+        
+        k_file, k_rank = move_to_rank_file(attempt_move.start)
+        i = 0
+
+        while i < 2:
+            k_file, k_rank = k_file+f_step, k_rank+r_step
+            king_pos = rank_file_to_move(k_file, k_rank)
+            checks = self.check_test(attempt_move.colour, king_pos)
+            if len(checks) > 0:
+                return False
+            i = i + 1
+        return True
+       
+    def castle_move(self, king_piece, attempt_move):
+        rook_start, rook_end = king_piece.rook_square(attempt_move.castling)
+        start_square = self.square_find(rook_start)
+        end_square = self.square_find(rook_end)
+        rook_piece = self.square_find(start_square.name).piece
+
+        end_square.add_piece(rook_piece)
+        start_square.remove_piece()
+        rook_piece.last_move = attempt_move
+
     #Find pieces in hori/verti/diag line of sight of a king as well as 
     #knight moves on king and check if there is piece that checks the
     #king
@@ -315,7 +373,6 @@ class Board:
 
         king_checks = []
         check_pieces = self.hori_verti_diag_extent(king_loc)
-        print(king_col, king_loc)
         move_end = king_loc
         for idx, piece in enumerate(check_pieces):
             move_start = piece.loc
@@ -629,6 +686,8 @@ class Board:
 
         if end_square.piece.name == 'King':
             self.king_loc[end_square.piece.colour] = end_square.piece.loc
+        print(end_square.piece.loc, end_square.piece.name)
+
 
     def board_move_undo(self, start_square, end_square, old_piece):
         promotion = self.promote_check(end_square.piece, end_square.name)
@@ -708,7 +767,53 @@ class Piece:
     def fen_code(self):
         lower(colour[0])
         return lower(colour[0]) + PIECE_INFO[name]['FEN']
-    
+   
+    def rook_type(self, king_loc):
+        direct = self.direction
+        theta = np.radians(90*direct)
+        c, s = round(np.cos(theta)), round(np.sin(theta))
+        k_file, k_rank = move_to_rank_file(king_loc)
+        R_file, R_rank = move_to_rank_file(self.loc)
+        r_diff = k_rank - R_rank
+        f_diff = k_file - R_file
+
+        if s == 0:
+            f_diff = k_file - R_file
+            type_test = f_diff*c
+        elif c == 0:
+            r_diff = k_rank - R_rank
+            type_test = r_diff*s
+
+        if type_test > 0:
+            r_type = 'Queen'
+        elif type_test < 0:
+            r_type = 'King'
+        else:
+            print('Rook_type search failed')
+        return r_type
+
+    def rook_square(self, rook_type):
+        k_file, k_rank = move_to_rank_file(self.loc)
+
+        theta = np.radians(90*self.direction)
+        c, s = round(np.cos(theta)), round(np.sin(theta))
+        diff_arr = np.array([c, s]) 
+        if s == 0:
+            r_step = 0
+            f_step = c
+        elif c == 0:
+            r_step = s
+            f_step = 0
+        if rook_type == 'King':
+            r_file_start, r_file_end = k_file + f_step*1, k_file + f_step*-1
+            r_rank_start, r_rank_end = k_rank + r_step*1, k_rank + r_step*-1
+        elif rook_type == 'Queen':
+            r_file_start, r_file_end = k_file + f_step*-2, k_file + f_step*1
+            r_rank_start, r_rank_end = k_rank + r_step*-2, k_rank + r_step*1
+        r_start_square = rank_file_to_move(r_file_start, r_rank_start)
+        r_end_square = rank_file_to_move(r_file_end, r_rank_end)
+        return r_start_square, r_end_square
+
 class Square:
     def __init__(self, rank, file_, blocked = False):
         self.rank = rank
@@ -738,7 +843,7 @@ class Square:
 
 #Creates class for a chess move
 class Move:
-    def __init__(self, number, colour, start, end):
+    def __init__(self, number, colour, start, end, k_castle = 0, q_castle = 0):
         self.number = number
         self.colour = colour
         self.start = start
@@ -746,7 +851,12 @@ class Move:
         self.end = end
         self.f_end, self.r_end = move_to_rank_file(self.end)
         self.checks = {}
-        self.castle = False
+        self.k_castle = k_castle
+        self.q_castle = q_castle
+
+        self.castling = False
+        self.promoting = False
+        self.mating = False
 
     def r_diff(self):
         return self.r_end - self.r_start
@@ -755,7 +865,16 @@ class Move:
         return self.f_end - self.f_start
 
     def pgn_create(self, piece_start, piece_end, checks):
-        
+
+        if self.castling == 'King':
+            self.pgn = 'O-O'
+            self.display = 'O-O'
+            return
+        elif self.castling == 'Queen':
+            self.pgn = 'O-O-O'
+            self.display = 'O-O-O'
+            return
+
         start_string = PIECE_INFO[piece_start.name]['symbol'] + self.start
 
         if piece_end is None:
@@ -765,13 +884,18 @@ class Move:
             middle = 'x'
             end_string = PIECE_INFO[piece_end.name]['symbol'] + self.end
 
+        if self.promoting:
+            end_string = end_string + '=D'
+
         check_string = '+'*checks
+
+        if self.mating:
+            check_string = '#'
 
         self.pgn = start_string + middle + end_string + check_string
 
         self.display = (PIECE_INFO[piece_start.name]['symbol'] + self.end +
                         check_string)
-        print(self.pgn)
     
     #Check if legal move is being made, dummy is true if move is not 
     #suggested but just a check for legality of a board position
@@ -807,7 +931,7 @@ class Move:
 
         #King can move 1 square in any direction (assuming not in check)
         elif piece.name == 'King':
-            return self.king_test()
+            return self.king_test(squares, piece)
 
         elif piece.name == 'Knight':
             return self.knight_test(squares)
@@ -948,10 +1072,13 @@ class Move:
         else:
             return False
 
-    def king_test(self):
+    def king_test(self, squares, piece):
         #King can move 1 space in any direction - whether king is in check
         #is checked later on
         if abs(self.f_diff()) <= 1 and abs(self.r_diff()) <= 1:
+            return True
+        castling = self.castle_check(squares, piece)
+        if castling:
             return True
         else: 
             return False
@@ -986,17 +1113,68 @@ class Move:
 
         #If no piece present then check if can move 1 or 2 squares
         if piece_check == None:
-            if m1_check == True:
+            if m1_check:
                 return True
             #2 moves forward only allowed if pawn has not moved
-            elif m2_check == True and moved_check == False:
+            elif m2_check and moved_check == False:
                 return True
         #If piece present then check if diagonal capture is possible
         elif piece_check != None:
-            if diag_check == True:
+            if diag_check:
                 return True
         return False
 
+    def castle_check(self, squares, piece):
+        if self.k_castle == 0 and self.q_castle == 0:
+            return False
+        
+        rf_diff = np.array([self.r_diff(), self.f_diff()])
+        
+        direct = piece.direction
+        theta = np.radians(90*direct)
+        c, s = round(np.cos(theta)), round(np.sin(theta))
+        diff_arr = np.array([s,c])
+
+        king_cast_arr, queen_cast_arr = diff_arr*2, diff_arr*-2
+
+        king_cast_check = np.array_equal(rf_diff, king_cast_arr)
+        queen_cast_check = np.array_equal(rf_diff, queen_cast_arr)
+        
+        if king_cast_check and self.k_castle == 1:
+            self.castling = 'King'
+            r_step, f_step = king_cast_arr[0]/2, king_cast_arr[1]/2
+            square_dist = 3
+        elif queen_cast_check and self.q_castle == 1:
+            self.castling = 'Queen'
+            r_step, f_step = queen_cast_arr[0]/2, queen_cast_arr[1]/2
+            square_dist = 4
+        else:
+            if king_cast_check or queen_cast_check:
+                print('King cannot castle on this side anymore')
+            return False
+
+        k_file, k_rank = move_to_rank_file(self.start)
+        r_file = int(k_file+f_step*square_dist)
+        r_rank = int(k_rank+r_step*square_dist)
+        r_square = rank_file_to_move(r_file, r_rank)
+        stop = False
+        i = 1
+
+        while i <= square_dist and stop == False:
+            file_, rank = int(k_file + i*f_step), int(k_rank + i*r_step)
+            square = rank_file_to_move(file_, rank)
+            obstruction = square_find(square, squares).obstruct()
+            if obstruction == True:
+                return False
+            elif obstruction == False:
+                i = i+1
+                continue
+            else:
+                if obstruction.loc == r_square:
+                    return True
+                stop = True
+        return False
+        
 def move_to_rank_file(move_name):
     file_letter = move_name[0]
     file_number = int(alphabet.find(file_letter))+1
