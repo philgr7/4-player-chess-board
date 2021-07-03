@@ -170,13 +170,21 @@ class Board:
         #Creates Move object for testing that will be applied if success 
         attempt_move = Move(move_number, colour, move_start, move_end, k_castle,
                 q_castle)
+        attempt_move.total_number = len(self.move_list)+1
 
+        enpassant_piece = None
         #If rules turned on, checks if legal move has been made
         if self.rules:
             move_check = attempt_move.legal_check(piece_start, self.squares, dummy)
             if attempt_move.castling:
                 checked_castle = self.castle_checking(piece_start, attempt_move)
                 if not checked_castle:
+                    move_check = False
+            elif attempt_move.enpassant_cap:
+                enpassant_piece =self.square_find(attempt_move.enpassant_cap).piece
+                move_num_diff = (attempt_move.total_number - 
+                        enpassant_piece.last_move.total_number)
+                if move_num_diff > len(self.colours):
                     move_check = False
         else:
             move_check = True
@@ -192,10 +200,7 @@ class Board:
         end_square = self.square_find(move_end)
         old_piece = end_square.piece
 
-        self.board_move(start_square, end_square)
-
-        if attempt_move.castling:
-            self.castle_move(piece_start, attempt_move)
+        self.board_move(attempt_move)
 
         #If rules on all kings are checked for whether in check
         if self.rules:
@@ -205,19 +210,22 @@ class Board:
 
         #If dummy then want to return if king is checked
         if dummy:
-            self.board_move_undo(start_square, end_square, old_piece)    
+            self.board_move_undo(attempt_move, old_piece, enpassant_piece)
             return king_checks
 
         #Either invalid move or does mate check based on king_col being checked
+        new_mates = []
         for king_col, king_check_list in king_checks.items():
             if king_col == colour:
-                self.board_move_undo(start_square, end_square, old_piece)
+                self.board_move_undo(attempt_move, old_piece, enpassant_piece)
                 print('King in check')
                 return False
             else:
                 mate_test = self.test_mate(king_check_list, king_col)
                 if mate_test:
                     print('{} is checkmated!'.format(king_col))
+                    new_mates.append(king_col)
+                    self.mate_apply(king_col)
     
         #Confirm whether move caused a new check
         if king_checks:
@@ -230,13 +238,15 @@ class Board:
         self.stalemate_test()
         #If reaches here then move is allowed to occur and is recorded
         self.move_updates(attempt_move, piece_start, old_piece, end_square, 
-                new_checks, colour)
+                new_checks, new_mates, colour, enpassant_piece)
         return True
 
     def move_updates(self, attempt_move, piece_start, old_piece, end_square, 
-            new_checks, clr):
+            new_checks, new_mates, clr, enpassant_piece):
         end_square.piece.last_move = attempt_move
         self.move_list.append(attempt_move)
+
+        attempt_move.mating = new_mates
         attempt_move.pgn_create(piece_start, old_piece, new_checks)
         col_idx = (self.colours.index(clr) + 1)% (len(self.colours))
         self.to_play = self.colours[col_idx]
@@ -256,9 +266,10 @@ class Board:
             elif rook_type == 'Queen':
                 self.queen_castle[clr] = 0
         
-        if old_piece:
+        if old_piece and not old_piece.dead:
             if old_piece.name == 'Rook':
-                rook_type = old_piece.rook_type(self.king_loc[old_piece.colour])
+                rook_type = old_piece.rook_type(self.king_loc[old_piece.colour],
+                        attempt_move.start)
                 if rook_type == 'King':
                     self.king_castle[old_piece.colour] = 0
                 elif rook_type == 'Queen':
@@ -277,9 +288,18 @@ class Board:
                 bonus_score = 20
         elif new_checks > 3:
             print('ERROR - MORE THAN 3 CHECKS DETECTED')
-
+        bonus_score = bonus_score + 20*len(new_mates)
+        
+        cap_value = 0
         if old_piece:
-            self.scores[clr] = self.scores[clr] + old_piece.value + bonus_score 
+            if not old_piece.dead:
+                cap_value = old_piece.value
+
+        if enpassant_piece:
+            self.capture_list[clr].append(enpassant_piece)
+            cap_value = cap_value + 1
+
+        self.scores[clr] = self.scores[clr] + cap_value + bonus_score 
 
     def promote_check(self, piece, square_code):
         #in board move, want true if pawn with prom_rf = piece_rf, 
@@ -348,9 +368,10 @@ class Board:
         i = 0
 
         while i < 2:
-            k_file, k_rank = k_file+f_step, k_rank+r_step
-            king_pos = rank_file_to_move(k_file, k_rank)
-            checks = self.check_test(attempt_move.colour, king_pos)
+            k_file_test, k_rank_test = k_file+i*f_step, k_rank+i*r_step
+            king_pos_test = rank_file_to_move(k_file_test, k_rank_test)
+            checks = self.check_test(attempt_move.colour, king_pos_test)
+            print(checks, i, king_pos_test)
             if len(checks) > 0:
                 return False
             i = i + 1
@@ -377,7 +398,7 @@ class Board:
         for idx, piece in enumerate(check_pieces):
             move_start = piece.loc
             colour = piece.colour
-            if colour == king_col:
+            if colour == king_col or piece.dead:
                 continue
             attempt_move = Move(0, colour, move_start, move_end)
             check_test = attempt_move.legal_check(piece, self.squares,
@@ -605,6 +626,12 @@ class Board:
 
         return True
 
+    def mate_apply(self, king_col):
+        self.colours.remove(king_col)
+        del self.king_loc[king_col]
+        for piece in self.piece_pos[king_col]:
+            piece.dead = True
+
     def stalemate_test(self):
         #Knight_extent -> all knight moves
         #Hori_verti_diag_extent -> all rook/bishop/queen moves
@@ -659,6 +686,7 @@ class Board:
                     move_test = self.move(pos, move_end, dummy = True)
                     if move_test == False:
                         continue
+                    print(pos, move_end, piece.name)
                     if not colour in move_test:
                         stop = True
             
@@ -671,7 +699,10 @@ class Board:
         if piece.name == 'King':
             self.king_loc[piece.colour] = piece.loc
 
-    def board_move(self, start_square, end_square):
+    def board_move(self, attempt_move):
+        start_square = self.square_find(attempt_move.start)
+        end_square = self.square_find(attempt_move.end)
+
         promotion = self.promote_check(start_square.piece, end_square.name)
 
         if promotion:
@@ -680,16 +711,26 @@ class Board:
 
         if end_square.piece != None:
             end_square.piece.loc = None
-            self.capture_list[self.to_play].append(end_square.piece)
+            if not end_square.piece.dead:
+                self.capture_list[self.to_play].append(end_square.piece)
         end_square.add_piece(start_square.piece)
         start_square.remove_piece()
 
         if end_square.piece.name == 'King':
             self.king_loc[end_square.piece.colour] = end_square.piece.loc
-        print(end_square.piece.loc, end_square.piece.name)
+        
+        if attempt_move.castling:
+            self.castle_move(end_square.piece, attempt_move)
 
+        if attempt_move.enpassant_cap:
+            square_remove = self.square_find(attempt_move.enpassant_cap)
+            square_remove.piece.loc = None
+            square_remove.remove_piece()
 
-    def board_move_undo(self, start_square, end_square, old_piece):
+    def board_move_undo(self, attempt_move, old_piece, enpassant_piece):
+        start_square = self.square_find(attempt_move.start)
+        end_square = self.square_find(attempt_move.end)
+
         promotion = self.promote_check(end_square.piece, end_square.name)
 
         if promotion:
@@ -699,12 +740,18 @@ class Board:
         start_square.add_piece(end_square.piece)
         if old_piece != None:
             end_square.add_piece(old_piece)
-            del self.capture_list[self.to_play][-1]
+            if not old_piece.dead:
+                del self.capture_list[self.to_play][-1]
         else:
             end_square.remove_piece() 
 
         if start_square.piece.name == 'King':
             self.king_loc[start_square.piece.colour] = start_square.piece.loc
+
+        if attempt_move.enpassant_cap:
+            old_square = self.square_find(attempt_move.enpassant_cap)
+            self.piece_add(old_square, enpassant_piece)
+            enpassant_piece.loc = old_square.name
 
     def square_find(self, square_code):
             file_, rank = move_to_rank_file(square_code)
@@ -763,17 +810,19 @@ class Piece:
         self.loc = None
         self.direction = COLOUR_INFO.index(colour)
         self.promoted = False
+        self.dead = False
 
     def fen_code(self):
         lower(colour[0])
         return lower(colour[0]) + PIECE_INFO[name]['FEN']
    
-    def rook_type(self, king_loc):
-        direct = self.direction
-        theta = np.radians(90*direct)
+    def rook_type(self, king_loc, rook_loc = False):
+        if not rook_loc:
+            rook_loc = self.loc
+        theta = np.radians(90*self.direction)
         c, s = round(np.cos(theta)), round(np.sin(theta))
         k_file, k_rank = move_to_rank_file(king_loc)
-        R_file, R_rank = move_to_rank_file(self.loc)
+        R_file, R_rank = move_to_rank_file(rook_loc)
         r_diff = k_rank - R_rank
         f_diff = k_file - R_file
 
@@ -789,7 +838,7 @@ class Piece:
         elif type_test < 0:
             r_type = 'King'
         else:
-            print('Rook_type search failed')
+            r_type = False
         return r_type
 
     def rook_square(self, rook_type):
@@ -810,9 +859,30 @@ class Piece:
         elif rook_type == 'Queen':
             r_file_start, r_file_end = k_file + f_step*-2, k_file + f_step*1
             r_rank_start, r_rank_end = k_rank + r_step*-2, k_rank + r_step*1
-        r_start_square = rank_file_to_move(r_file_start, r_rank_start)
-        r_end_square = rank_file_to_move(r_file_end, r_rank_end)
+        r_start_square = rank_file_to_move(int(r_file_start), int(r_rank_start))
+        r_end_square = rank_file_to_move(int(r_file_end), int(r_rank_end))
         return r_start_square, r_end_square
+
+    def king_castle_square(self, castle_type):
+        k_file_start, k_rank_start = move_to_rank_file(self.loc)
+        
+        theta = np.radians(90*self.direction)
+        c, s = round(np.cos(theta)), round(np.sin(theta))
+        diff_arr = np.array([c, s]) 
+        if s == 0:
+            r_step = 0
+            f_step = c
+        elif c == 0:
+            r_step = s
+            f_step = 0
+        if castle_type == 'King':
+            k_file_end = k_file_start + f_step*2 
+            k_rank_end = k_rank_start + r_step*2
+        elif castle_type == 'Queen':
+            k_file_end = k_file_start + f_step*-2
+            k_rank_end = k_rank_start + f_step*-2
+        k_end_square = rank_file_to_move(int(k_file_end), int(k_rank_end))
+        return k_end_square
 
 class Square:
     def __init__(self, rank, file_, blocked = False):
@@ -845,6 +915,7 @@ class Square:
 class Move:
     def __init__(self, number, colour, start, end, k_castle = 0, q_castle = 0):
         self.number = number
+        self.total_number = 0
         self.colour = colour
         self.start = start
         self.f_start, self.r_start = move_to_rank_file(self.start)
@@ -854,9 +925,11 @@ class Move:
         self.k_castle = k_castle
         self.q_castle = q_castle
 
+        self.double_push = False
         self.castling = False
         self.promoting = False
-        self.mating = False
+        self.enpassant_cap = False
+        self.mating = []
 
     def r_diff(self):
         return self.r_end - self.r_start
@@ -883,14 +956,13 @@ class Move:
         else:
             middle = 'x'
             end_string = PIECE_INFO[piece_end.name]['symbol'] + self.end
+        if self.enpassant_cap:
+            middle = 'x'
 
         if self.promoting:
             end_string = end_string + '=D'
 
-        check_string = '+'*checks
-
-        if self.mating:
-            check_string = '#'
+        check_string = '+'*checks+'#'*len(self.mating)
 
         self.pgn = start_string + middle + end_string + check_string
 
@@ -1093,8 +1165,13 @@ class Move:
 
         #Arrays cover moving forward and capturing on either diagonal
         diff_arr = np.array([c,s])
-        diff_diag_1 = np.array([c-s, s-c])
-        diff_diag_2 = np.array([c+s, s+c])
+
+        if direct % 2 == 0:
+            diff_diag_L = np.array([c-s, s-c])
+            diff_diag_R = np.array([c+s, s+c])
+        elif direct % 2 == 1:
+            diff_diag_R = np.array([c-s, s-c])
+            diff_diag_L = np.array([c+s, s+c])
 
         #checks for piece at end square and whether pawn has moved before
         piece_check = square_find(self.end, squares).piece
@@ -1108,8 +1185,8 @@ class Move:
         #or diagonal piece capture
         m1_check = np.array_equal(rf_diff, diff_arr)
         m2_check = np.array_equal(rf_diff, 2*diff_arr)
-        diag_check = (np.array_equal(rf_diff, diff_diag_1) or
-                    np.array_equal(rf_diff, diff_diag_2))
+        L_diag_check = np.array_equal(rf_diff, diff_diag_L)
+        R_diag_check = np.array_equal(rf_diff, diff_diag_R)
 
         #If no piece present then check if can move 1 or 2 squares
         if piece_check == None:
@@ -1117,12 +1194,46 @@ class Move:
                 return True
             #2 moves forward only allowed if pawn has not moved
             elif m2_check and moved_check == False:
+                self.double_push = True
                 return True
         #If piece present then check if diagonal capture is possible
         elif piece_check != None:
-            if diag_check:
+            if R_diag_check or L_diag_check:
+                return True
+        
+        if R_diag_check or L_diag_check:
+            enpassant = self.enpassant_check(diff_arr, diff_diag_L, diff_diag_R, 
+                    rf_diff, piece, squares)
+            if enpassant:
                 return True
         return False
+
+    def enpassant_check(self, diff_arr, diff_diag_L, diff_diag_R, rf_diff, 
+            moving_piece, squares):
+        print(rf_diff, diff_diag_L, diff_diag_R, moving_piece.loc, diff_arr)
+        p_file_start, p_rank_start = move_to_rank_file(self.start)
+        obstr_file = p_file_start + diff_arr[1]
+        obstr_rank = p_rank_start + diff_arr[0]
+        obstr_sqre = rank_file_to_move(obstr_file, obstr_rank)
+        obstr_piece = square_find(obstr_sqre, squares).piece
+        if obstr_piece == None:
+            return False
+        elif obstr_piece.name != 'Pawn' or not obstr_piece.last_move:
+            print('not pawn', obstr_piece.name, obstr_piece.loc)
+            return False
+        elif not obstr_piece.last_move.double_push:
+            print('not double push', obstr_piece.name, obstr_piece.loc)
+            return False
+
+        direct_diff = (obstr_piece.direction - moving_piece.direction) %len(
+                COLOUR_INFO)
+        print(direct_diff)
+        if ((direct_diff == 1 and np.array_equal(diff_diag_L, rf_diff)) or 
+                (direct_diff == 3 and np.array_equal(diff_diag_R, rf_diff))):
+            self.enpassant_cap = obstr_piece.loc
+            return True
+        else:
+            return False
 
     def castle_check(self, squares, piece):
         if self.k_castle == 0 and self.q_castle == 0:

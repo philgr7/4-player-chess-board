@@ -166,7 +166,8 @@ class Display(tk.Tk):
         new_warning_text.pack(fill = 'x', side = 'top')
 
         game_reset = tk.Button(new_game_win, text = 'Reset', 
-                command = lambda: [self.reset(), self.piece_init()])
+                command = lambda: [self.reset(), self.piece_init(), 
+                        new_game_win.destroy()])
         game_reset.pack(side = 'left')
 
         game_reset_cancel = tk.Button(new_game_win, text = 'Cancel',
@@ -210,11 +211,11 @@ class Display(tk.Tk):
         self.load_text.pack(side = 'top', fill = tk.Y, expand = 1)
 
         load_game_pgn_but = tk.Button(win, text = 'Load PGN4', 
-                command = self.comm_load_pgn)
+                command = lambda: [self.comm_load_pgn(), win.destroy()])
         load_game_pgn_but.pack(side = 'bottom')
 
         load_game_fen_but = tk.Button(win, text = 'Load FEN4',
-                command = self.comm_load_fen)
+                command = lambda: [self.comm_load_fen(), win.destroy()])
         load_game_fen_but.pack(side = 'bottom')
 
         win.grid_columnconfigure(0, weight=1)
@@ -227,6 +228,9 @@ class Display(tk.Tk):
                 
         for label_object in self.tool_frame.winfo_children():
             label_object.destroy()
+        self.cap_update_all()
+        for clr, score in self.board.scores.items():
+            self.score_displays[clr]['text'] = score
 
     def comm_load_pgn(self):
         self.load_pgn(self.load_text.get('1.0', 'end-1c'))
@@ -291,9 +295,13 @@ class Display(tk.Tk):
             pos_x = (square.file_ - 0.5) * self.s_height
             pos_y = (self.board.nrows + 0.5 - square.rank) * self.s_width
 
+            colour = piece.colour
+            if piece.dead:
+                colour = 'black'
+
             text = self.board_canvas.create_text(pos_x, pos_y,
                 text = PIECE_INFO[piece.name]['unicode'], 
-                fill = piece.colour, font = (None, 35))
+                fill = colour, font = (None, 35))
 
             piece_loc[text] = piece.loc
 
@@ -357,6 +365,11 @@ class Display(tk.Tk):
 
             self.piece_loc[self.drag_piece] = move_end
             self.move_populate(self.board.move_list)
+
+            self.special_move_apply(move_end)
+
+            self.cap_update_all()
+
             for clr, score in self.board.scores.items():
                 self.score_displays[clr]['text'] = score
 
@@ -365,12 +378,19 @@ class Display(tk.Tk):
                 self.board_canvas.itemconfig(self.drag_piece, 
                         text = PIECE_INFO['Queen']['unicode'])
 
-            self.cap_update_all()
-
             castle_check = self.board.move_list[-1].castling
             if castle_check:
                 self.castle_move(castle_check, end_piece)
 
+            if len(self.board.move_list[-1].mating) > 0:
+                for col in self.board.move_list[-1].mating:
+                    for piece in self.board.piece_pos[col]:
+                        if piece.loc != None:
+                            loc = piece.loc
+                        obj = list(self.piece_loc.keys())[list(
+                                self.piece_loc.values()).index(loc)]
+                        self.board_canvas.itemconfig(obj, fill = 'black')
+                        
         else:
             pos_x = (index_init_x-0.5)*self.s_height
             pos_y = (index_init_y-0.5)*self.s_width
@@ -397,6 +417,34 @@ class Display(tk.Tk):
         
         tk.Label(self.tool_frame, text = display_move, width = 6).grid(
                 row = move_number - 1, column = column)
+
+    def special_move_apply(self, move_end):
+        
+        end_piece = self.board.square_find(move_end).piece
+        if end_piece.name == 'Queen' and end_piece.promoted == True:
+            self.board_canvas.itemconfig(self.drag_piece, 
+                    text = PIECE_INFO['Queen']['unicode'])
+
+        castle_check = self.board.move_list[-1].castling
+        if castle_check:
+            self.castle_move(castle_check, end_piece)
+
+        if len(self.board.move_list[-1].mating) > 0:
+            for col in self.board.move_list[-1].mating:
+                for piece in self.board.piece_pos[col]:
+                    if piece.loc != None:
+                        loc = piece.loc
+                    obj = list(self.piece_loc.keys())[list(
+                            self.piece_loc.values()).index(loc)]
+                    self.board_canvas.itemconfig(obj, fill = 'black')
+
+        enpassant_loc = self.board.move_list[-1].enpassant_cap
+        if enpassant_loc:
+            obj = list(self.piece_loc.keys())[list(
+                    self.piece_loc.values()).index(enpassant_loc)]
+
+            self.board_canvas.delete(obj)            
+            self.piece_loc[obj] = False
 
     def castle_move(self, castle_check, king_piece):
         rook_start_square, rook_end_square = king_piece.rook_square(castle_check)
@@ -432,21 +480,30 @@ class Display(tk.Tk):
         if len(pgn) == 1:
             return 0, 0
         if pgn == 'O-O' or pgn == 'O-O-O':
-            print('castling')
-            return
+            if pgn == 'O-O':
+                castle_type = 'King'
+            else:
+                castle_type = 'Queen'
+            clr = self.board.to_play
+            move_start = self.board.king_loc[clr]
+            king_piece = self.board.square_find(move_start).piece
+            move_end = king_piece.king_castle_square(castle_type)
 
-        move_split = pgn.split('+')
-        move_split = move_split[0].split('=D')
-        move_split = move.split[0].split('#')
-        move_split = move_split[0].split('x')
+        else:
+            move_split = pgn.split('+')
+            move_split = move_split[0].split('=D')
+            move_split = move_split[0].split('#')
+            move_split = move_split[0].split('x')
 
-        if len(move_split) == 1:
-            move_split = move_split[0].split('-')
+            if len(move_split) == 1:
+                move_split = move_split[0].split('-')
 
-        for idx, string in enumerate(move_split):
-            if string[0].isupper():
-                move_split[idx] = string[1:]
-        return move_split[0], move_split[1]
+            for idx, string in enumerate(move_split):
+                if string[0].isupper():
+                    move_split[idx] = string[1:]
+            move_start = move_split[0]
+            move_end = move_split[1]
+        return move_start, move_end
 
     def load_pgn(self, pgn_code):
         move_text = pgn_code.split('\n1. ', 1)[1]
