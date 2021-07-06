@@ -34,6 +34,8 @@ class Display(tk.Tk):
         self.s_width = self.board_width/self.board.ncols
         self.s_height = self.board_height/self.board.nrows
 
+        self.game_over = False
+
         self.display_init()
         self.board_init()
         self.piece_init()
@@ -46,10 +48,11 @@ class Display(tk.Tk):
         self.board_canvas = tk.Canvas(self.frame, height = self.board_height,
                         width = self.board_width, highlightthickness = 0)
         self.board_canvas.grid(column = 2, row = 1)
-
+        
         self.colour_init()
         self.tools_init()
         self.rank_file_labels()
+        self.to_move_init()
 
     def colour_init(self):
         self.score_displays = {}
@@ -63,6 +66,19 @@ class Display(tk.Tk):
                 self.board_height, 90, 3, 1)
         self.cap_update_all()
         
+    def to_move_init(self):
+        self.to_move_canvas = tk.Canvas(self.frame, background = 'white',
+            width = 300, height = 90, highlightthickness = 0)
+        self.to_move_canvas.grid(row = 3, column = 4)
+        self.to_move_label = tk.Label(self.to_move_canvas, text =
+            '{} to play'.format(self.board.to_play), fg = self.board.to_play,
+            font = (None, 35), bg = 'white')
+        self.to_move_label.pack(side = 'left')
+        self.resign_but = tk.Button(self.to_move_canvas, text = 'Resign', bd = 0,
+            width = 5, height = 1, highlightthickness = 0, padx = 0, pady = 0, 
+            command = self.comm_resign)
+        self.resign_but.pack(side = 'left')
+
     def clr_dis(self, root, colour, height, width, col, row):
         clr_frame = tk.Frame(root, height = height, width = width)
         clr_frame.grid(column = col, row = row)
@@ -232,6 +248,22 @@ class Display(tk.Tk):
         for clr, score in self.board.scores.items():
             self.score_displays[clr]['text'] = score
 
+    def comm_resign(self):
+        resign_win = tk.Toplevel()
+        
+        resign_warning = tk.Label(resign_win, text = ('Are you sure '+
+            'you want to resign ({})'.format(self.board.to_play)), 
+                fg = self.board.to_play)
+        resign_warning.pack(fill = 'x', side = 'top')
+
+        resign = tk.Button(resign_win, text = 'Resign', 
+                command = lambda: [self.resign(), resign_win.destroy()])
+        resign.pack(side = 'left')
+
+        resign_cancel = tk.Button(resign_win, text = 'Cancel',
+                command = lambda: resign_win.destroy())
+        resign_cancel.pack(side = 'right')        
+
     def comm_load_pgn(self):
         self.load_pgn(self.load_text.get('1.0', 'end-1c'))
         return
@@ -240,6 +272,75 @@ class Display(tk.Tk):
         self.load_fen(self.load_text.get('1.0', 'end-1c'))
         self.board.fen_to_board(self.load_text.get('1.0', 'end-1c'))
         return
+
+    def resign(self):
+        clr = self.board.to_play
+        for piece in self.board.piece_pos[clr]:
+            if piece.loc != None:
+                loc = piece.loc
+            obj = list(self.piece_loc.keys())[list(
+                    self.piece_loc.values()).index(loc)]
+            if piece.name != 'King':
+                self.board_canvas.itemconfig(obj, fill = 'black')
+        self.board.resign_apply()
+
+        self.res_king_move()
+
+        self.resign_check()
+        
+    def res_king_move(self):
+        king_start = self.board.move_list[-1].start
+        king_end = self.board.move_list[-1].end
+
+        for obj, loc in self.piece_loc.items():
+            if king_start == loc:
+                obj_king = obj
+            elif king_end == loc:
+                obj_del = obj
+                self.piece_loc[obj_del] = False
+                self.board_canvas.delete(obj_del)
+
+        file_end, rank_end = move_to_rank_file(king_end)
+        index_x = file_end
+        index_y = self.board.nrows + 1 - rank_end
+            
+        pos_x = (index_x-0.5)*self.s_height
+        pos_y = (index_y-0.5)*self.s_width
+
+        self.board_canvas.coords(obj_king, (pos_x, pos_y))
+            
+        self.piece_loc[obj_king] = king_end
+
+        self.move_populate(self.board.move_list)
+        self.update_to_play()
+
+    def resign_check(self):
+        while self.board.to_play in self.board.resign_list:
+            king_loc = self.board.king_loc[self.board.to_play]
+            king_col = self.board.square_find(king_loc).piece.colour
+            if king_col in self.board.colours:
+                self.board.king_random_move(king_loc)
+                self.res_king_move()
+        if len(self.board.colours) - len(self.board.resign_list) == 1:
+            self.game_over_apply()
+        return
+
+    def game_over_apply(self):
+        game_over_win = tk.Toplevel()
+
+        final_col = next(iter((set(self.board.colours) - 
+                        set(self.board.resign_list))))
+        self.board.scores[final_col] += len(self.board.resign_list)*20
+
+        tk.Label(game_over_win, text = 'GAME OVER', font = (None, 35)).pack()
+
+        for clr in COLOUR_INFO:
+            tk.Label(game_over_win, text = '{}: {}'.format(clr, 
+                self.board.scores[clr]), fg = clr).pack()
+
+        self.to_move_canvas.delete("all")
+        self.game_over = True
+        self.board.game_over = True
 
     def rank_file_labels(self):
         file_labels = tk.Canvas(self.frame, width = self.board_width,
@@ -373,24 +474,9 @@ class Display(tk.Tk):
             for clr, score in self.board.scores.items():
                 self.score_displays[clr]['text'] = score
 
-            end_piece = self.board.square_find(move_end).piece
-            if end_piece.name == 'Queen' and end_piece.promoted == True:
-                self.board_canvas.itemconfig(self.drag_piece, 
-                        text = PIECE_INFO['Queen']['unicode'])
+            self.update_to_play()
+            self.resign_check()
 
-            castle_check = self.board.move_list[-1].castling
-            if castle_check:
-                self.castle_move(castle_check, end_piece)
-
-            if len(self.board.move_list[-1].mating) > 0:
-                for col in self.board.move_list[-1].mating:
-                    for piece in self.board.piece_pos[col]:
-                        if piece.loc != None:
-                            loc = piece.loc
-                        obj = list(self.piece_loc.keys())[list(
-                                self.piece_loc.values()).index(loc)]
-                        self.board_canvas.itemconfig(obj, fill = 'black')
-                        
         else:
             pos_x = (index_init_x-0.5)*self.s_height
             pos_y = (index_init_y-0.5)*self.s_width
@@ -406,17 +492,18 @@ class Display(tk.Tk):
         current_move = move_list[-1]
         move_number = current_move.number
         display_move = current_move.display
-        
+        clr = current_move.colour
+
         num_clrs = len(COLOUR_INFO)
         column = ((COLOUR_INFO.index(
                         move_list[-1].colour)) %num_clrs)+1
         
         if move_number > prev_move_num:
-            tk.Label(self.tool_frame, text = move_number, width = 2).grid(
-                    column = 0, row = move_number - 1)
+            tk.Label(self.tool_frame, text = move_number, width = 2
+                    ).grid(column = 0, row = move_number - 1)
         
-        tk.Label(self.tool_frame, text = display_move, width = 6).grid(
-                row = move_number - 1, column = column)
+        tk.Label(self.tool_frame, text = display_move, width = 6, fg = clr
+                ).grid(row = move_number - 1, column = column)
 
     def special_move_apply(self, move_end):
         
@@ -434,6 +521,8 @@ class Display(tk.Tk):
                 for piece in self.board.piece_pos[col]:
                     if piece.loc != None:
                         loc = piece.loc
+                    else:
+                        continue
                     obj = list(self.piece_loc.keys())[list(
                             self.piece_loc.values()).index(loc)]
                     self.board_canvas.itemconfig(obj, fill = 'black')
@@ -464,6 +553,10 @@ class Display(tk.Tk):
         self.board_canvas.coords(rook_obj, (pos_x, pos_y))
             
         self.piece_loc[rook_obj] = rook_end_square
+
+    def update_to_play(self):
+        clr = self.board.to_play
+        self.to_move_label.config(text = '{} to play'.format(clr), fg = clr)
 
     def coords_to_index(self, x, y):
         index_x = np.ceil(x/self.s_width)
@@ -529,11 +622,15 @@ class Display(tk.Tk):
 
         self.piece_init()
         self.cap_update_all()
-        
+        self.update_to_play()
+        self.resign_check()
+
     def load_fen(self, fen_code):
         self.reset()
         self.board.fen_to_board(fen_code)
         self.piece_init()
+        self.update_to_play()
+        self.resign_check()
 
     def board_to_fen(self):
         fen = ''
