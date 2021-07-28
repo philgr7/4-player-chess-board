@@ -35,6 +35,8 @@ class Display(tk.Tk):
         self.s_height = self.board_height/self.board.nrows
 
         self.game_over = False
+        self.move_obj = []
+        self.move_number = 0
 
         self.display_init()
         self.board_init()
@@ -278,6 +280,8 @@ class Display(tk.Tk):
         for piece in self.board.piece_pos[clr]:
             if piece.loc != None:
                 loc = piece.loc
+            else:
+                continue
             obj = list(self.piece_loc.keys())[list(
                     self.piece_loc.values()).index(loc)]
             if piece.name != 'King':
@@ -315,13 +319,14 @@ class Display(tk.Tk):
         self.update_to_play()
 
     def resign_check(self):
-        while self.board.to_play in self.board.resign_list:
+        while self.board.to_play in self.board.resign_list and not self.game_over:
             king_loc = self.board.king_loc[self.board.to_play]
             king_col = self.board.square_find(king_loc).piece.colour
             if king_col in self.board.colours:
                 self.board.king_random_move(king_loc)
                 self.res_king_move()
         if len(self.board.colours) - len(self.board.resign_list) == 1:
+            self.game_over = True
             self.game_over_apply()
         return
 
@@ -337,6 +342,9 @@ class Display(tk.Tk):
         for clr in COLOUR_INFO:
             tk.Label(game_over_win, text = '{}: {}'.format(clr, 
                 self.board.scores[clr]), fg = clr).pack()
+
+        for clr, score in self.board.scores.items():
+            self.score_displays[clr]['text'] = score     
 
         self.to_move_canvas.delete("all")
         self.game_over = True
@@ -502,8 +510,44 @@ class Display(tk.Tk):
             tk.Label(self.tool_frame, text = move_number, width = 2
                     ).grid(column = 0, row = move_number - 1)
         
-        tk.Label(self.tool_frame, text = display_move, width = 6, fg = clr
-                ).grid(row = move_number - 1, column = column)
+        move_obj = tk.Label(self.tool_frame, text = display_move, 
+            width = 6, fg = clr)
+        move_obj.grid(row = move_number - 1, column = column)
+        
+        self.move_obj.append(move_obj) 
+
+        move_obj.bind('<ButtonPress-1>', lambda event, move_obj = move_obj:
+                    self.board_change(move_obj))
+
+        self.move_number = self.move_number + 1
+
+    def board_change(self, move_obj):
+        idx_max = self.move_number - 1
+        idx = self.move_number - 1
+        idx_end = self.move_obj.index(move_obj)
+        
+        stop = False
+
+        if idx > idx_end:
+            step = -1
+        elif idx < idx_end:
+            step = 1
+        elif idx == idx_end:
+            stop = True
+        while not stop:
+            self.board_state(idx, step)
+            if idx == idx_end + 1 or idx == idx_end:
+                stop = True
+            else:
+                idx = idx + step
+
+        print(idx)
+
+    def board_state(self, idx, direction):
+
+        move = self.board.move_list[idx]
+
+        self.board.temp_move_apply(move, direction)
 
     def special_move_apply(self, move_end):
         
@@ -607,14 +651,24 @@ class Display(tk.Tk):
         self.reset()
 
         for idx, line in enumerate(move_num_split): 
+            if line == '':
+                continue
             if idx != 0:
                 print(line)
                 line = line.split(' ', 1)[1]
             move_number = idx + 1
             moves = line.split(' .. ')
             for pgn in moves:
+                resign = False
+                if pgn[-1] == 'R':
+                    self.board.resign_apply(move = False)
+                    pgn = pgn[:-1]
+                    resign = True
+                    if len(self.board.colours) - len(self.board.resign_list) == 1:
+                        self.game_over = True
+                        continue
                 move_start, move_end = self.pgn_to_moves(pgn)
-                self.board.move(move_start, move_end)
+                self.board.move(move_start, move_end, resign)
                 self.move_populate(self.board.move_list)
         
         for clr, score in self.board.scores.items():

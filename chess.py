@@ -50,6 +50,8 @@ class Board:
         self.move_list = []
         self.resign_list = []
 
+        self.game_over = False
+
         self.board_init()
         self.colour_init()
         self.piece_init()
@@ -144,14 +146,15 @@ class Board:
 
     #After a move is requested if rules is turned on then a check is done
     #for legality and the move is applied and stored
-    def move(self, move_start, move_end, dummy = False):
-         
+    def move(self, move_start, move_end, resign = False, dummy = False):
+
         piece_start = self.square_find(move_start).piece
 
         if piece_start is None:
             return print('No piece in start square')
         
         if self.square_find(move_end).blocked:
+            print(move_start, move_end, dummy)
             print('End square is blocked')
             return False
 
@@ -226,13 +229,13 @@ class Board:
                 return False
             else:
                 mate_test = self.test_mate(king_check_list, king_col)
-                print(mate_test, king_col)
                 if mate_test:
                     print('{} is checkmated!'.format(king_col))
                     new_mates.append(king_col)
                     self.mate_apply(king_col)
 
         if old_piece != None:
+            attempt_move.old_piece = old_piece
             if old_piece.name == 'King' and not old_piece.dead:
                 king_col = old_piece.colour
                 print('{} is checkmated!'.format(king_col))
@@ -251,16 +254,17 @@ class Board:
 
         #If reaches here then move is allowed to occur and is recorded
         self.move_updates(attempt_move, piece_start, old_piece, end_square, 
-                new_checks, new_mates, new_stale, colour, enpassant_piece)
+                new_checks, new_mates, new_stale, colour, enpassant_piece, resign)
 
         return True
 
     def move_updates(self, attempt_move, piece_start, old_piece, end_square, 
-            new_checks, new_mates, new_stale, clr, enpassant_piece):
+            new_checks, new_mates, new_stale, clr, enpassant_piece, resign):
         self.total_moves = self.total_moves + 1
         end_square.piece.last_move = attempt_move
         self.move_list.append(attempt_move)
 
+        attempt_move.resign = resign
         attempt_move.mating = new_mates
         attempt_move.stale = new_stale
         attempt_move.pgn_create(piece_start, old_piece, new_checks)
@@ -365,6 +369,8 @@ class Board:
 
         if prom_rf == piece_rf:
             return True
+        else:
+            return False
 
     #Confirms the status of all kings for checks
     def all_check_test(self):
@@ -580,6 +586,9 @@ class Board:
                 r_index < 0 or r_index > self.nrows - 1):
                 continue
             move_end = self.squares[r_index][f_index].name
+            
+            if self.square_find(move_end).obstruct() == True:
+                continue
 
             checked_checks = self.move(move_start, move_end, dummy = True) 
             if checked_checks == False:
@@ -670,7 +679,29 @@ class Board:
         for piece in self.piece_pos[king_col]:
             piece.dead = True
 
-    def resign_apply(self):
+    def mate_undo(self, king_col, king_piece):
+
+        king_idx = self.colours.index(king_col)
+        col_before = self.colours[:idx]
+        max_idx = len(self.colours) - 1
+
+        stop = False
+        i = 0
+
+        while stop = False:
+            if self.colours[i] not in col_before:
+                self.colours.insert(i, king_col)
+                stop = True
+            elif i == max_idx:
+                self.colours.append(king_col)
+                stop = True
+            i = i + 1
+
+        self.king_loc[king_col] = king_piece.loc
+        for piece in self.piece_pos[king_col]:
+            piece.dead = False
+
+    def resign_apply(self, move = True):
         king_col = self.to_play
         self.resign_list.append(king_col)
         for piece in self.piece_pos[king_col]:
@@ -679,9 +710,18 @@ class Board:
                 piece.dead = False
                 king_loc = piece.loc
                 piece.resigned = True
-        self.king_random_move(king_loc)
 
-    def king_random_move(self, king_loc):
+        if move:
+            self.king_random_move(king_loc, resign = True)
+
+    def resign_undo(self, king_col):
+        self.resign_list.remove(king_col)
+        for piece in self.piece_pos[king_col]:
+            piece.dead = False
+            if piece.name = 'King':
+                piece.resigned = False
+
+    def king_random_move(self, king_loc, resign = False):
         file_, rank = move_to_rank_file(king_loc)
         
         move_direct = [[-1, -1], [-1, 0], [-1, 1], [0, -1],
@@ -709,7 +749,7 @@ class Board:
             elif self.to_play in move_check:
                 moves.remove(king_att_end)
             else:
-                self.move(king_loc, king_att_end)
+                self.move(king_loc, king_att_end, resign)
                 stop = True
 
     def stalemate_test(self):
@@ -883,6 +923,82 @@ class Board:
 
         self.piece_fen_init(fen_list[6])
 
+    def temp_move_apply(self, move, direction):
+
+        if direction == 1:
+            start_square = self.square_find(move.start)
+            end_square = self.square_find(move.end)
+
+        elif direction == -1:
+            start_square = self.square_find(move.end)
+            end_square = self.square_find(move.start)
+
+        piece_start = start_square.piece
+        piece_end = end_square.piece
+        colour = move.colour
+
+        if move.promoting:
+            if direction == 1:
+                piece_start.promoted = True
+                piece_start.name = 'Queen'
+            elif direction == -1:
+                piece_start.promoted = False
+                piece_start.name = 'Pawn'
+
+        if piece_end != None:
+            piece_end.loc = None
+            if not piece_end.dead:
+                self.capture_list[self.to_play].append(piece_end)
+        end_square.add_piece(piece_start)
+        start_square.remove_piece()
+    
+        if piece_start.name == 'King':
+            self.king_loc[piece_start.colour] = piece_start.loc
+        
+        if move.castling:
+            self.castle_move(end_square.piece, move)
+
+        if move.enpassant_cap:
+            square_remove = self.square_find(move.enpassant_cap)
+            square_remove.piece.loc = None
+            square_remove.remove_piece()
+
+        for clr in move.mating:
+            if direction == 1:
+                self.mate_apply(clr)
+            elif direction == -1:
+                self.mate_undo(clr)
+
+        end_square.piece.last_move = move
+        
+        col_idx = (self.colours.index(clr) + 1)% (len(self.colours))
+        self.to_play = self.colours[col_idx]
+
+        if piece_start.name == 'King':
+            self.king_castle[clr] = 0
+            self.queen_castle[clr] = 0
+
+        elif piece_start.name == 'Rook':
+            rook_type = piece_start.rook_type(self.king_loc[colour])
+            if rook_type == 'King':
+                self.king_castle[clr] = 0
+            elif rook_type == 'Queen':
+                self.queen_castle[clr] = 0
+        
+        if old_piece and not old_piece.dead:
+            if old_piece.name == 'Rook':
+                rook_type = old_piece.rook_type(self.king_loc[old_piece.colour],
+                        move.start)
+                if rook_type == 'King':
+                    self.king_castle[old_piece.colour] = 0
+                elif rook_type == 'Queen':
+                    self.queen_castle[old_piece.colour] = 0
+        
+        new_checks = len(move.checking)
+
+        self.score_update(new_checks, move.mating, move.stale, piece_start, 
+                piece_end, enpassant_piece, colour)
+
 #Creates class for a chess piece
 class Piece:
 
@@ -1011,6 +1127,8 @@ class Move:
         self.checks = {}
         self.k_castle = k_castle
         self.q_castle = q_castle
+        
+        self.old_piece = None
 
         self.double_push = False
         self.castling = False
@@ -1052,6 +1170,9 @@ class Move:
             end_string = end_string + '=D'
 
         check_string = '+'*checks+'#'*len(self.mating)
+
+        if self.resign:
+            check_string = check_string + 'R'
 
         self.pgn = start_string + middle + end_string + check_string
 
