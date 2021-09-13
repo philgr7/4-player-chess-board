@@ -299,7 +299,7 @@ class Board:
                 old_piece, enpassant_piece, clr)
 
     def score_update(self, new_checks, new_mates, new_stale, piece_start,
-            old_piece, enpassant_piece, clr):
+            old_piece, enpassant_piece, clr, forward = True):
         
         bonus_score = 0
         if new_checks == 2:
@@ -325,20 +325,27 @@ class Board:
             if col in self.resign_list:
                 self.resign_list.remove(col)
                 for colour in self.colours:
-                    self.scores[colour] = self.scores[colour] + 10
+                    bonus_score = bonus_score + 10
             else:
-                self.scores[col] = self.scores[col] + 20
+                bonus_score = bonus_score + 20
 
         cap_value = 0
+       
         if old_piece:
-            if not old_piece.dead and not piece_start.resigned:
+            print(old_piece.dead, old_piece.value, forward)
+            if ((old_piece.colour in new_mates or not old_piece.dead) 
+            and not piece_start.resigned):
                 cap_value = old_piece.value
 
         if enpassant_piece:
             self.capture_list[clr].append(enpassant_piece)
             cap_value = cap_value + 1
 
-        self.scores[clr] = self.scores[clr] + cap_value + bonus_score 
+        extra_score = bonus_score + cap_value
+        if forward:
+            self.scores[clr] = self.scores[clr] + extra_score 
+        else:
+            self.scores[clr] = self.scores[clr] - extra_score
 
     def promote_check(self, piece, square_code):
         #in board move, want true if pawn with prom_rf = piece_rf, 
@@ -679,16 +686,16 @@ class Board:
         for piece in self.piece_pos[king_col]:
             piece.dead = True
 
-    def mate_undo(self, king_col, king_piece):
+    def mate_undo(self, king_col):
 
-        king_idx = self.colours.index(king_col)
-        col_before = self.colours[:idx]
+        king_idx = COLOUR_INFO.index(king_col)
+        col_before = self.colours[:king_idx]
         max_idx = len(self.colours) - 1
 
         stop = False
         i = 0
 
-        while stop = False:
+        while stop == False:
             if self.colours[i] not in col_before:
                 self.colours.insert(i, king_col)
                 stop = True
@@ -697,9 +704,11 @@ class Board:
                 stop = True
             i = i + 1
 
-        self.king_loc[king_col] = king_piece.loc
         for piece in self.piece_pos[king_col]:
             piece.dead = False
+            if piece.name == 'King':
+                king_piece = piece
+        self.king_loc[king_col] = king_piece.loc
 
     def resign_apply(self, move = True):
         king_col = self.to_play
@@ -718,7 +727,7 @@ class Board:
         self.resign_list.remove(king_col)
         for piece in self.piece_pos[king_col]:
             piece.dead = False
-            if piece.name = 'King':
+            if piece.name == 'King':
                 piece.resigned = False
 
     def king_random_move(self, king_loc, resign = False):
@@ -935,6 +944,8 @@ class Board:
 
         piece_start = start_square.piece
         piece_end = end_square.piece
+        old_piece = move.old_piece
+        enpassant_piece = False
         colour = move.colour
 
         if move.promoting:
@@ -951,7 +962,7 @@ class Board:
                 self.capture_list[self.to_play].append(piece_end)
         end_square.add_piece(piece_start)
         start_square.remove_piece()
-    
+
         if piece_start.name == 'King':
             self.king_loc[piece_start.colour] = piece_start.loc
         
@@ -960,32 +971,11 @@ class Board:
 
         if move.enpassant_cap:
             square_remove = self.square_find(move.enpassant_cap)
+            enpassant_piece = square_remove.piece
             square_remove.piece.loc = None
             square_remove.remove_piece()
-
-        for clr in move.mating:
-            if direction == 1:
-                self.mate_apply(clr)
-            elif direction == -1:
-                self.mate_undo(clr)
-
-        end_square.piece.last_move = move
         
-        col_idx = (self.colours.index(clr) + 1)% (len(self.colours))
-        self.to_play = self.colours[col_idx]
-
-        if piece_start.name == 'King':
-            self.king_castle[clr] = 0
-            self.queen_castle[clr] = 0
-
-        elif piece_start.name == 'Rook':
-            rook_type = piece_start.rook_type(self.king_loc[colour])
-            if rook_type == 'King':
-                self.king_castle[clr] = 0
-            elif rook_type == 'Queen':
-                self.queen_castle[clr] = 0
-        
-        if old_piece and not old_piece.dead:
+        if old_piece and not old_piece.dead and direction == 1:
             if old_piece.name == 'Rook':
                 rook_type = old_piece.rook_type(self.king_loc[old_piece.colour],
                         move.start)
@@ -994,10 +984,54 @@ class Board:
                 elif rook_type == 'Queen':
                     self.queen_castle[old_piece.colour] = 0
         
-        new_checks = len(move.checking)
+        elif old_piece and direction == -1:
+            start_square.add_piece(old_piece)
+            if not old_piece.dead:
+                self.capture_list[colour].pop()
+
+        for clr in move.mating:
+            if direction == 1:
+                self.mate_apply(clr)
+            elif direction == -1:
+                self.mate_undo(clr)
+
+        if move.resign:
+            if direction == 1:
+                self.resign_apply(move = False)
+            elif direction == -1:
+                self.resign_undo(colour)
+        end_square.piece.last_move = move
+       
+        if direction == 1:
+            col_idx = (self.colours.index(colour) + 1)% (len(self.colours))
+        elif direction == -1:
+            col_idx = (self.colours.index(colour)) % (len(self.colours))
+        
+        self.to_play = self.colours[col_idx]
+
+        if piece_start.name == 'King':
+            if direction == 1:
+                self.king_castle[colour] = 0
+                self.queen_castle[colour] = 0
+
+        elif piece_start.name == 'Rook':
+            rook_type = piece_start.rook_type(self.king_loc[colour])
+            if rook_type == 'King':
+                self.king_castle[colour] = 0
+            elif rook_type == 'Queen':
+                self.queen_castle[colour] = 0
+      
+        print(self.scores)
+
+        new_checks = len(move.checks)
+
+        if direction == 1:
+            frwd = True
+        else:
+            frwd = False
 
         self.score_update(new_checks, move.mating, move.stale, piece_start, 
-                piece_end, enpassant_piece, colour)
+                old_piece, enpassant_piece, colour, forward = frwd)
 
 #Creates class for a chess piece
 class Piece:
@@ -1167,6 +1201,8 @@ class Move:
             middle = 'x'
 
         if self.promoting:
+            start_string = self.start
+            print(piece_start.name)
             end_string = end_string + '=D'
 
         check_string = '+'*checks+'#'*len(self.mating)
@@ -1178,6 +1214,8 @@ class Move:
 
         self.display = (PIECE_INFO[piece_start.name]['symbol'] + self.end +
                         check_string)
+        if self.promoting:    
+            self.display = self.end + '=D'
     
     #Check if legal move is being made, dummy is true if move is not 
     #suggested but just a check for legality of a board position

@@ -37,6 +37,7 @@ class Display(tk.Tk):
         self.game_over = False
         self.move_obj = []
         self.move_number = 0
+        self.state_idx = -1
 
         self.display_init()
         self.board_init()
@@ -249,6 +250,11 @@ class Display(tk.Tk):
         self.cap_update_all()
         for clr, score in self.board.scores.items():
             self.score_displays[clr]['text'] = score
+        self.update_to_play()
+        self.move_number = 0
+        self.state_idx = -1
+        self.game_over = False
+        self.move_obj = []
 
     def comm_resign(self):
         resign_win = tk.Toplevel()
@@ -365,11 +371,9 @@ class Display(tk.Tk):
         rank_labels.grid(column = 1, row = 1)
        
         for i in range(14, 0, -1):
-            rank_labels.create_text(10, self.board_height - (i-0.5)*self.s_height, 
-                    text = i)
+            rank_labels.create_text(10, self.board_height - (i-0.5)*self.s_height,                  text = i)
 
-    def board_init(self):
-        
+    def board_init(self): 
         for i in range(self.board.nrows):
             for j in range(self.board.ncols):
                 if (i + j)%2 == 0:
@@ -507,10 +511,10 @@ class Display(tk.Tk):
                         move_list[-1].colour)) %num_clrs)+1
         
         if move_number > prev_move_num:
-            tk.Label(self.tool_frame, text = move_number, width = 2
+            tk.Label(self.tool_frame, text = move_number, width = 2, bg = 'grey',
                     ).grid(column = 0, row = move_number - 1)
         
-        move_obj = tk.Label(self.tool_frame, text = display_move, 
+        move_obj = tk.Label(self.tool_frame, text = display_move, bg = 'grey',
             width = 6, fg = clr)
         move_obj.grid(row = move_number - 1, column = column)
         
@@ -519,13 +523,23 @@ class Display(tk.Tk):
         move_obj.bind('<ButtonPress-1>', lambda event, move_obj = move_obj:
                     self.board_change(move_obj))
 
+        move_obj.config(bg = 'white')
+        
+        if len(self.move_obj) > 1:
+            self.move_obj[-2].config(bg = 'grey')
+
         self.move_number = self.move_number + 1
+        self.state_idx = self.state_idx + 1
 
     def board_change(self, move_obj):
+
         idx_max = self.move_number - 1
-        idx = self.move_number - 1
+        idx = self.state_idx
         idx_end = self.move_obj.index(move_obj)
-        
+
+        self.move_obj[idx].config(bg = 'grey')
+        move_obj.config(bg = 'white')
+
         stop = False
 
         if idx > idx_end:
@@ -536,17 +550,28 @@ class Display(tk.Tk):
             stop = True
         while not stop:
             self.board_state(idx, step)
-            if idx == idx_end + 1 or idx == idx_end:
+            if (step == 1 and idx == idx_end - 1 or 
+                    step == -1 and idx == idx_end + 1):
                 stop = True
-            else:
-                idx = idx + step
+            idx = idx + step
 
-        print(idx)
+        self.state_idx = idx
+
+        for obj_number in self.piece_loc.keys():
+            self.board_canvas.delete(obj_number)
+        
+        self.piece_init()
+        self.cap_update_all()
+        self.update_to_play()
+        
+        for clr, score in self.board.scores.items():
+            self.score_displays[clr]['text'] = score
 
     def board_state(self, idx, direction):
 
+        if direction == 1:
+            idx = idx + direction
         move = self.board.move_list[idx]
-
         self.board.temp_move_apply(move, direction)
 
     def special_move_apply(self, move_end):
