@@ -421,7 +421,9 @@ class Display(tk.Tk):
         self.piece_loc = piece_loc
 
     def pick_up(self, event):
-   
+        if self.game_over:
+            return
+
         object_id = self.board_canvas.find_closest(event.x, event.y, halo=0)[0]
 
         if object_id in self.piece_loc.keys():
@@ -432,6 +434,8 @@ class Display(tk.Tk):
             self.drag_piece = None
 
     def drag(self, event):
+        if self.game_over:
+            return
         if self.drag_piece == None:
             return
 
@@ -444,6 +448,8 @@ class Display(tk.Tk):
         self.drag_y = event.y
 
     def drop(self, event):
+        if self.game_over:
+            return
         if self.drag_piece == None:
             return
 

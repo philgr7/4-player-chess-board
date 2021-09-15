@@ -333,13 +333,15 @@ class Board:
        
         if old_piece:
             print(old_piece.dead, old_piece.value, forward)
-            if ((old_piece.colour in new_mates or not old_piece.dead) 
-            and not piece_start.resigned):
+            if ((old_piece.colour in new_mates or not old_piece.dead)
+            and not old_piece.resigned and not piece_start.resigned 
+            and old_piece.colour != clr and old_piece.name != 'King'):
                 cap_value = old_piece.value
 
         if enpassant_piece:
-            self.capture_list[clr].append(enpassant_piece)
             cap_value = cap_value + 1
+            if forward:
+                self.capture_list[clr].append(enpassant_piece)
 
         extra_score = bonus_score + cap_value
         if forward:
@@ -429,6 +431,7 @@ class Board:
         start_square = self.square_find(rook_start)
         end_square = self.square_find(rook_end)
         rook_piece = self.square_find(start_square.name).piece
+        attempt_move.castle_rook = [start_square, end_square, rook_piece]
 
         end_square.add_piece(rook_piece)
         start_square.remove_piece()
@@ -703,11 +706,14 @@ class Board:
                 self.colours.append(king_col)
                 stop = True
             i = i + 1
-
+        
         for piece in self.piece_pos[king_col]:
-            piece.dead = False
             if piece.name == 'King':
                 king_piece = piece
+                king_piece.dead = False
+        if not king_piece.resigned:
+            for piece in self.piece_pos[king_col]:
+                piece.dead = False
         self.king_loc[king_col] = king_piece.loc
 
     def resign_apply(self, move = True):
@@ -715,10 +721,10 @@ class Board:
         self.resign_list.append(king_col)
         for piece in self.piece_pos[king_col]:
             piece.dead = True
+            piece.resigned = True
             if piece.name == 'King':
                 piece.dead = False
                 king_loc = piece.loc
-                piece.resigned = True
 
         if move:
             self.king_random_move(king_loc, resign = True)
@@ -727,8 +733,7 @@ class Board:
         self.resign_list.remove(king_col)
         for piece in self.piece_pos[king_col]:
             piece.dead = False
-            if piece.name == 'King':
-                piece.resigned = False
+            piece.resigned = False
 
     def king_random_move(self, king_loc, resign = False):
         file_, rank = move_to_rank_file(king_loc)
@@ -845,7 +850,7 @@ class Board:
 
         if end_square.piece != None:
             end_square.piece.loc = None
-            if not end_square.piece.dead:
+            if not end_square.piece.dead and not start_square.piece.resigned:
                 self.capture_list[self.to_play].append(end_square.piece)
         end_square.add_piece(start_square.piece)
         start_square.remove_piece()
@@ -875,7 +880,7 @@ class Board:
         start_square.add_piece(end_square.piece)
         if old_piece != None:
             end_square.add_piece(old_piece)
-            if not old_piece.dead:
+            if not old_piece.dead and not start_square.piece.resigned:
                 del self.capture_list[self.to_play][-1]
         else:
             end_square.remove_piece() 
@@ -958,22 +963,36 @@ class Board:
 
         if piece_end != None:
             piece_end.loc = None
-            if not piece_end.dead:
+            if not piece_end.dead and piece_end.colour != colour:
                 self.capture_list[self.to_play].append(piece_end)
         end_square.add_piece(piece_start)
         start_square.remove_piece()
+
+        print(self.capture_list)
 
         if piece_start.name == 'King':
             self.king_loc[piece_start.colour] = piece_start.loc
         
         if move.castling:
-            self.castle_move(end_square.piece, move)
+            if direction == 1:
+                self.castle_move(end_square.piece, move)
+            elif direction == -1:
+                rook_start = move.castle_rook[0]
+                rook_end = move.castle_rook[1]
+                rook_piece = move.castle_rook[-1]
+                rook_start.add_piece(rook_piece)
+                rook_end.remove_piece()
 
         if move.enpassant_cap:
-            square_remove = self.square_find(move.enpassant_cap)
-            enpassant_piece = square_remove.piece
-            square_remove.piece.loc = None
-            square_remove.remove_piece()
+            square_enp = self.square_find(move.enpassant_cap)
+            if direction == 1:
+                enpassant_piece = square_enp.piece
+                square_enp.piece.loc = None
+                square_enp.remove_piece()
+
+            elif direction == -1:
+                enpassant_piece = self.capture_list[colour].pop()
+                square_enp.add_piece(enpassant_piece)
         
         if old_piece and not old_piece.dead and direction == 1:
             if old_piece.name == 'Rook':
@@ -986,7 +1005,9 @@ class Board:
         
         elif old_piece and direction == -1:
             start_square.add_piece(old_piece)
-            if not old_piece.dead:
+            if ((old_piece.colour in move.mating or not old_piece.dead)
+            and not old_piece.resigned and not piece_start.resigned 
+            and old_piece.colour != colour and old_piece.name != 'King'):
                 self.capture_list[colour].pop()
 
         for clr in move.mating:
@@ -1161,9 +1182,11 @@ class Move:
         self.checks = {}
         self.k_castle = k_castle
         self.q_castle = q_castle
-        
-        self.old_piece = None
 
+        self.old_piece = None
+        self.castle_rook = None
+
+        self.castle_change = False
         self.double_push = False
         self.castling = False
         self.promoting = False
