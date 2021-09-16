@@ -35,6 +35,10 @@ class Display(tk.Tk):
         self.s_height = self.board_height/self.board.nrows
 
         self.game_over = False
+        self.board_review = False
+
+        self.saving_moves = None
+
         self.move_obj = []
         self.move_number = 0
         self.state_idx = -1
@@ -106,6 +110,8 @@ class Display(tk.Tk):
         self.cap_piece_update(self.clr_2, COLOUR_INFO[1], 0, 4)
         self.cap_piece_update(self.clr_3, COLOUR_INFO[2], 4, 0)
         self.cap_piece_update(self.clr_4, COLOUR_INFO[3], 0, 4)
+        if self.board.game_over:
+            self.game_over_apply()
 
     def cap_piece_update(self, disp, colour,  rows, cols):
         cap_list = self.board.capture_list[colour]
@@ -194,10 +200,43 @@ class Display(tk.Tk):
         game_reset_cancel.pack(side = 'right')        
 
     def save_game(self):
-        move_list = self.board.move_list
-        
-        moves_str = ''
 
+        self.comm_pgn_save()
+
+        win = tk.Toplevel()
+        win.geometry('600x600')
+
+        save_text = tk.Text(win)
+        save_text.grid(row = 0, column = 0, sticky = 'nsew')
+        save_text.insert(tk.END, self.saving_moves)
+        
+        save_but_frame = tk.LabelFrame(win, background = 'white',
+            highlightthickness = 0, height = 15, width = 600)
+        save_but_frame.grid(row = 1, column = 0)
+
+        save_pgn_but = tk.Button(save_but_frame, text = 'PGN4', 
+                command = lambda: [self.comm_pgn_save(), 
+                    save_text.delete('1.0', tk.END),
+                    save_text.insert(tk.END, self.saving_moves)])
+        save_pgn_but.pack(side = 'left')
+
+        save_fen_but = tk.Button(save_but_frame, text = 'FEN4', 
+                command = lambda: [self.comm_fen_save(),
+                    save_text.delete('1.0', tk.END),
+                    save_text.insert(tk.END, self.saving_moves)])
+        save_fen_but.pack(side = 'left')
+
+        save_text_but = tk.Button(save_but_frame, text = 'Copy to clipboard',
+                command = lambda: pyperclip.copy(self.saving_moves))
+        save_text_but.pack(side = 'left')
+
+        win.grid_columnconfigure(0, weight=1)
+        win.grid_rowconfigure(0, weight=1)
+    
+    def comm_pgn_save(self):
+        move_list = self.board.move_list
+        moves_str = ''
+        
         for move in move_list:
             if move.colour == self.board.colours[0]:
                 moves_str = moves_str + str(move.number) + '. '
@@ -207,21 +246,8 @@ class Display(tk.Tk):
                 moves_str = moves_str + ' .. '
             else:
                 moves_str = moves_str + '\n'
+        self.saving_moves = moves_str
 
-        win = tk.Toplevel()
-        win.geometry('600x600')
-
-        save_text = tk.Text(win)
-        save_text.grid(row = 0, column = 0, sticky = 'nsew')
-        save_text.insert(tk.END, moves_str)
-
-        save_text_but = tk.Button(win, text = 'Copy to clipboard',
-                command = lambda: pyperclip.copy(moves_str))
-        save_text_but.grid(row = 1, column = 0)
-
-        win.grid_columnconfigure(0, weight=1)
-        win.grid_rowconfigure(0, weight=1)
-    
     def load_game(self):
         win = tk.Toplevel()
         win.geometry('600x600')
@@ -352,7 +378,7 @@ class Display(tk.Tk):
         for clr, score in self.board.scores.items():
             self.score_displays[clr]['text'] = score     
 
-        self.to_move_canvas.delete("all")
+        self.resign_but.destroy()
         self.game_over = True
         self.board.game_over = True
 
@@ -377,9 +403,9 @@ class Display(tk.Tk):
         for i in range(self.board.nrows):
             for j in range(self.board.ncols):
                 if (i + j)%2 == 0:
-                    colour = 'white'
+                    colour = 'lightgray'
                 elif (i+j)%2 == 1:
-                    colour = 'grey'
+                    colour = 'gray'
                 if ((i < self.board.corner or 
                     i >= self.board.nrows - self.board.corner) and
                     (j < self.board.corner or 
@@ -421,7 +447,7 @@ class Display(tk.Tk):
         self.piece_loc = piece_loc
 
     def pick_up(self, event):
-        if self.game_over:
+        if self.game_over or self.board_review:
             return
 
         object_id = self.board_canvas.find_closest(event.x, event.y, halo=0)[0]
@@ -434,7 +460,7 @@ class Display(tk.Tk):
             self.drag_piece = None
 
     def drag(self, event):
-        if self.game_over:
+        if self.game_over or self.board_review:
             return
         if self.drag_piece == None:
             return
@@ -448,7 +474,7 @@ class Display(tk.Tk):
         self.drag_y = event.y
 
     def drop(self, event):
-        if self.game_over:
+        if self.game_over or self.board_review:
             return
         if self.drag_piece == None:
             return
@@ -529,7 +555,7 @@ class Display(tk.Tk):
         move_obj.bind('<ButtonPress-1>', lambda event, move_obj = move_obj:
                     self.board_change(move_obj))
 
-        move_obj.config(bg = 'white')
+        move_obj.config(bg = 'black')
         
         if len(self.move_obj) > 1:
             self.move_obj[-2].config(bg = 'grey')
@@ -538,13 +564,14 @@ class Display(tk.Tk):
         self.state_idx = self.state_idx + 1
 
     def board_change(self, move_obj):
+        self.board_review = True
 
         idx_max = self.move_number - 1
         idx = self.state_idx
         idx_end = self.move_obj.index(move_obj)
 
         self.move_obj[idx].config(bg = 'grey')
-        move_obj.config(bg = 'white')
+        move_obj.config(bg = 'black')
 
         stop = False
 
@@ -572,6 +599,9 @@ class Display(tk.Tk):
         
         for clr, score in self.board.scores.items():
             self.score_displays[clr]['text'] = score
+
+        if idx == idx_max:
+            self.board_review = False
 
     def board_state(self, idx, direction):
 
@@ -717,10 +747,10 @@ class Display(tk.Tk):
         self.update_to_play()
         self.resign_check()
 
-    def board_to_fen(self):
+    def comm_fen_save(self):
         fen = ''
 
-        fen = fen + self.board.to_move + '-'
+        fen = fen + self.board.to_play[0] + '-'
         
         in_game = []
         king_castle = []
@@ -729,17 +759,21 @@ class Display(tk.Tk):
 
         for clr in COLOUR_INFO:
             if clr in self.board.colours:
-                in_game.append(str(1))
-            else:
                 in_game.append(str(0))
+            else:
+                in_game.append(str(1))
             king_castle.append(str(self.board.king_castle[clr]))
             queen_castle.append(str(self.board.queen_castle[clr]))
             score.append(str(self.board.scores[clr]))
 
-        fen = (fen + ','.join(in_game) + '-' + '.'.join(king_castle) + '-' +
-                ','.join(queen_castle) + '-' + '.'.join(score) + '-')
+        fen = (fen + ','.join(in_game) + '-' + ','.join(king_castle) + '-' +
+                ','.join(queen_castle) + '-' + ','.join(score) + '-')
 
-        fen = fen + self.half_moves + '-' + self.board.board_pos_fen()
+        fen = fen + str(self.board.half_moves) + '-\n' + self.board.board_pos_fen()
+   
+        print(fen)
+
+        self.saving_moves = fen
 
 def move_to_rank_file(move_name):
     file_letter = move_name[0]

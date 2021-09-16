@@ -34,7 +34,7 @@ class Board:
         
         self.colours = [colour for colour in COLOUR_INFO]
         self.to_play = COLOUR_INFO[0]
-        self.half_moves = 0
+        self.half_moves = [0, 4]
         self.total_moves = 0
 
         #Stores move objects, king_piece objects, piece objects and square 
@@ -261,19 +261,27 @@ class Board:
     def move_updates(self, attempt_move, piece_start, old_piece, end_square, 
             new_checks, new_mates, new_stale, clr, enpassant_piece, resign):
         self.total_moves = self.total_moves + 1
+
+        self.half_move_update(attempt_move, piece_start, old_piece)
+
+        if attempt_move.draw:
+            self.game_over = True
+
         end_square.piece.last_move = attempt_move
         self.move_list.append(attempt_move)
+        
+        if piece_start.promoted == 'Temp':
+            piece_start.promoted = True
+            attempt_move.promoting = True
 
         attempt_move.resign = resign
         attempt_move.mating = new_mates
         attempt_move.stale = new_stale
         attempt_move.pgn_create(piece_start, old_piece, new_checks)
+        attempt_move.half_move = self.half_moves
+        attempt_move.new_checks = new_checks
         col_idx = (self.colours.index(clr) + 1)% (len(self.colours))
         self.to_play = self.colours[col_idx]
-
-        if piece_start.promoted == 'Temp':
-            piece_start.promoted = True
-            attempt_move.promoting = True
 
         if piece_start.name == 'King':
             self.king_castle[clr] = 0
@@ -296,10 +304,10 @@ class Board:
                     self.queen_castle[old_piece.colour] = 0
 
         self.score_update(new_checks, new_mates, new_stale, piece_start, 
-                old_piece, enpassant_piece, clr)
+                old_piece, enpassant_piece, clr, attempt_move.draw)
 
     def score_update(self, new_checks, new_mates, new_stale, piece_start,
-            old_piece, enpassant_piece, clr, forward = True):
+            old_piece, enpassant_piece, clr, draw, forward = True):
         
         bonus_score = 0
         if new_checks == 2:
@@ -332,7 +340,6 @@ class Board:
         cap_value = 0
        
         if old_piece:
-            print(old_piece.dead, old_piece.value, forward)
             if ((old_piece.colour in new_mates or not old_piece.dead)
             and not old_piece.resigned and not piece_start.resigned 
             and old_piece.colour != clr and old_piece.name != 'King'):
@@ -345,9 +352,26 @@ class Board:
 
         extra_score = bonus_score + cap_value
         if forward:
-            self.scores[clr] = self.scores[clr] + extra_score 
+            self.scores[clr] = self.scores[clr] + extra_score
+            if draw:
+                for clr_ in self.colours:
+                    self.scores[clr_] = self.scores[clr_] + 10
         else:
             self.scores[clr] = self.scores[clr] - extra_score
+            if draw:
+                for clr_ in self.colours:
+                    self.scores[clr_] = self.scores[clr_] - 10
+
+    def half_move_update(self, attempt_move, piece_start, old_piece):
+        if old_piece or piece_start.name == 'Pawn' or attempt_move.promoting:
+            self.half_moves[0] = 0
+        elif self.half_moves[1] != len(self.colours):
+            self.half_moves[0] = 0
+            self.half_moves[1] = len(self.colours)
+        else:
+            self.half_moves[0] = self.half_moves[0] + 1
+        if self.half_moves[0]/self.half_moves[1] > 50:
+            attempt_move.draw = True    
 
     def promote_check(self, piece, square_code):
         #in board move, want true if pawn with prom_rf = piece_rf, 
@@ -898,21 +922,24 @@ class Board:
             return self.squares[rank-1][file_-1]
 
     def board_pos_fen(self):
-        empty_count = 0
         fen_string = ''
         for i in range(self.nrows):
             row_info = []
+            empty_count = 0
             for j in range(self.ncols):
-                piece = self.squares[i][self.ncols-1-j].piece
+                piece = self.squares[self.nrows-1-i][j].piece
                 if piece is None:
                     empty_count = empty_count + 1
                 else:
                     if empty_count > 0:
                         row_info.append(str(empty_count))
+                        empty_count = 0
                     row_info.append(piece.fen)
             if empty_count > 0:
                 row_info.append(str(empty_count))
-            fen_string = fen_string + ','.join(row_info) + '/\n'
+            fen_string = fen_string + ','.join(str(x) for x in row_info) + '/\n'
+        fen_string = fen_string[:-2]
+        
         return fen_string
 
     def fen_to_board(self, fen):
@@ -937,15 +964,57 @@ class Board:
 
         self.piece_fen_init(fen_list[6])
 
+    def board_to_fen(self):
+        in_game = []
+        king_castle = []
+        queen_castle = []
+        scores = []
+        
+        clr_to_letter = {'Red': 'R', 'Blue': 'B', 'Yellow': 'Y', 'Green': 'G'}
+
+        for idx, clr in enumerate(COLOUR_INFO):
+            if self.colours[idx] in COLOUR_INFO:
+                in_game.append(1)
+            else:
+                in_game.append(0)
+            king_castle.append(self.king_castle[clr])
+            queen_castle.append(self.queen_castle[clr])
+            scores.append(self.scores[clr])
+
+        fen_list = (clr_to_letter[self.to_play] + '-' + ','.join(in_game) + '-' +
+                ','.join(king_castle) + '-' + ','.join(queen_castle) + '-' + 
+                ','.join(scores) + '-' + ','.join(half_moves) + '-\n')
+        
+        for i in range(self.nrows):
+            row_list = []
+            counter = 0
+            for j in range(self.ncols):
+                piece = self.squares[i][j].piece
+                if not piece:
+                    counter = counter + 1
+                else:
+                    row_list.append(counter)
+                    counter = 0
+                    text = clr_to_letter[piece.colour] + piece.name[0]
+                    row_list.append(text)
+            if counter > 0:
+                row_list.append(counter)
+            fen_list + ','.join(row_list) + '/\n'
+        fen_list = fen_list[:-3]
+
+        return fen_list
+
     def temp_move_apply(self, move, direction):
 
         if direction == 1:
             start_square = self.square_find(move.start)
             end_square = self.square_find(move.end)
+            self.total_moves = self.total_moves + 1
 
         elif direction == -1:
             start_square = self.square_find(move.end)
             end_square = self.square_find(move.start)
+            self.total_moves = self.total_moves - 1
 
         piece_start = start_square.piece
         piece_end = end_square.piece
@@ -967,8 +1036,6 @@ class Board:
                 self.capture_list[self.to_play].append(piece_end)
         end_square.add_piece(piece_start)
         start_square.remove_piece()
-
-        print(self.capture_list)
 
         if piece_start.name == 'King':
             self.king_loc[piece_start.colour] = piece_start.loc
@@ -1042,9 +1109,7 @@ class Board:
             elif rook_type == 'Queen':
                 self.queen_castle[colour] = 0
       
-        print(self.scores)
-
-        new_checks = len(move.checks)
+        new_checks = move.new_checks
 
         if direction == 1:
             frwd = True
@@ -1052,7 +1117,7 @@ class Board:
             frwd = False
 
         self.score_update(new_checks, move.mating, move.stale, piece_start, 
-                old_piece, enpassant_piece, colour, forward = frwd)
+                old_piece, enpassant_piece, colour, move.draw, forward = frwd)
 
 #Creates class for a chess piece
 class Piece:
@@ -1070,9 +1135,11 @@ class Piece:
         self.dead = False
         self.resigned = False
 
+        self.fen = self.fen_code()
+
     def fen_code(self):
-        lower(colour[0])
-        return lower(colour[0]) + PIECE_INFO[name]['FEN']
+        fen = self.colour[0].lower() + PIECE_INFO[self.name]['FEN']
+        return fen
    
     def rook_type(self, king_loc, rook_loc = False):
         if not rook_loc:
@@ -1174,17 +1241,20 @@ class Move:
     def __init__(self, number, colour, start, end, k_castle = 0, q_castle = 0):
         self.number = number
         self.total_number = 0
+        self.half_moves = [0, 0]
         self.colour = colour
         self.start = start
         self.f_start, self.r_start = move_to_rank_file(self.start)
         self.end = end
         self.f_end, self.r_end = move_to_rank_file(self.end)
         self.checks = {}
+        self.new_checks = 0
         self.k_castle = k_castle
         self.q_castle = q_castle
 
         self.old_piece = None
         self.castle_rook = None
+        self.display = None
 
         self.castle_change = False
         self.double_push = False
@@ -1192,6 +1262,7 @@ class Move:
         self.promoting = False
         self.enpassant_cap = False
         self.resign = False
+        self.draw = False
         self.mating = []
         self.stale = []
 
@@ -1237,7 +1308,7 @@ class Move:
 
         self.display = (PIECE_INFO[piece_start.name]['symbol'] + self.end +
                         check_string)
-        if self.promoting:    
+        if self.promoting:   
             self.display = self.end + '=D'
     
     #Check if legal move is being made, dummy is true if move is not 
