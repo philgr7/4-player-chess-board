@@ -110,8 +110,6 @@ class Display(tk.Tk):
         self.cap_piece_update(self.clr_2, COLOUR_INFO[1], 0, 4)
         self.cap_piece_update(self.clr_3, COLOUR_INFO[2], 4, 0)
         self.cap_piece_update(self.clr_4, COLOUR_INFO[3], 0, 4)
-        if self.board.game_over:
-            self.game_over_apply()
 
     def cap_piece_update(self, disp, colour,  rows, cols):
         cap_list = self.board.capture_list[colour]
@@ -236,16 +234,18 @@ class Display(tk.Tk):
     def comm_pgn_save(self):
         move_list = self.board.move_list
         moves_str = ''
-        
-        for move in move_list:
-            if move.colour == self.board.colours[0]:
-                moves_str = moves_str + str(move.number) + '. '
-            moves_str = moves_str + move.pgn
-
-            if move.colour != self.board.colours[-1]:
-                moves_str = moves_str + ' .. '
+       
+        old_num = 0
+        for idx, move in enumerate(move_list):
+            if move.number == old_num:
+                moves_str += ' .. '
             else:
-                moves_str = moves_str + '\n'
+                moves_str += '\n' + str(move.number) + '. '
+            
+            moves_str += move.pgn
+
+            old_num = move.number
+
         self.saving_moves = moves_str
 
     def load_game(self):
@@ -280,7 +280,11 @@ class Display(tk.Tk):
         self.move_number = 0
         self.state_idx = -1
         self.game_over = False
+        self.board_review = False
         self.move_obj = []
+
+        if not self.resign_but.winfo_ismapped():
+            self.resign_but.pack(side = 'left')
 
     def comm_resign(self):
         resign_win = tk.Toplevel()
@@ -357,17 +361,13 @@ class Display(tk.Tk):
             if king_col in self.board.colours:
                 self.board.king_random_move(king_loc)
                 self.res_king_move()
-        if len(self.board.colours) - len(self.board.resign_list) == 1:
+        if self.board.game_over and not self.game_over:
             self.game_over = True
             self.game_over_apply()
         return
 
     def game_over_apply(self):
         game_over_win = tk.Toplevel()
-
-        final_col = next(iter((set(self.board.colours) - 
-                        set(self.board.resign_list))))
-        self.board.scores[final_col] += len(self.board.resign_list)*20
 
         tk.Label(game_over_win, text = 'GAME OVER', font = (None, 35)).pack()
 
@@ -378,9 +378,7 @@ class Display(tk.Tk):
         for clr, score in self.board.scores.items():
             self.score_displays[clr]['text'] = score     
 
-        self.resign_but.destroy()
-        self.game_over = True
-        self.board.game_over = True
+        self.resign_but.pack_forget()
 
     def rank_file_labels(self):
         file_labels = tk.Canvas(self.frame, width = self.board_width,
@@ -565,6 +563,7 @@ class Display(tk.Tk):
 
     def board_change(self, move_obj):
         self.board_review = True
+        self.resign_but.pack_forget()
 
         idx_max = self.move_number - 1
         idx = self.state_idx
@@ -602,6 +601,8 @@ class Display(tk.Tk):
 
         if idx == idx_max:
             self.board_review = False
+            if not self.game_over:
+                self.resign_but.pack(side = 'left')
 
     def board_state(self, idx, direction):
 
@@ -662,7 +663,7 @@ class Display(tk.Tk):
     def update_to_play(self):
         clr = self.board.to_play
         self.to_move_label.config(text = '{} to play'.format(clr), fg = clr)
-
+    
     def coords_to_index(self, x, y):
         index_x = np.ceil(x/self.s_width)
         index_y = np.ceil(y/self.s_height)
@@ -722,11 +723,14 @@ class Display(tk.Tk):
             for pgn in moves:
                 resign = False
                 if pgn[-1] == 'R':
-                    self.board.resign_apply(move = False)
+                    move = False
+                    if pgn == 'R':
+                        move = True
+                    self.board.resign_apply(move)
                     pgn = pgn[:-1]
                     resign = True
-                    if len(self.board.colours) - len(self.board.resign_list) == 1:
-                        self.game_over = True
+                    if self.board.game_over:
+                        self.move_populate(self.board.move_list)
                         continue
                 move_start, move_end = self.pgn_to_moves(pgn)
                 self.board.move(move_start, move_end, resign)
@@ -769,7 +773,7 @@ class Display(tk.Tk):
         fen = (fen + ','.join(in_game) + '-' + ','.join(king_castle) + '-' +
                 ','.join(queen_castle) + '-' + ','.join(score) + '-')
 
-        fen = fen + str(self.board.half_moves) + '-\n' + self.board.board_pos_fen()
+        fen = fen + str(self.board.half_moves[0]) + '-\n' + self.board.board_pos_fen()
    
         print(fen)
 

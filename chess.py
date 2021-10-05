@@ -258,14 +258,23 @@ class Board:
 
         return True
 
+    def game_over_check(self):
+        return len(self.colours) - len(self.resign_list) == 1
+
     def move_updates(self, attempt_move, piece_start, old_piece, end_square, 
             new_checks, new_mates, new_stale, clr, enpassant_piece, resign):
+        
         self.total_moves = self.total_moves + 1
-
+        
         self.half_move_update(attempt_move, piece_start, old_piece)
-
-        if attempt_move.draw:
+        
+        game_over = False
+        if self.game_over_check() or attempt_move.draw:
+            game_over = True
+            attempt_move.game_over = True
             self.game_over = True
+            for col__ in self.resign_list:
+                attempt_move.extra_resign.append(col__)
 
         end_square.piece.last_move = attempt_move
         self.move_list.append(attempt_move)
@@ -304,11 +313,13 @@ class Board:
                     self.queen_castle[old_piece.colour] = 0
 
         self.score_update(new_checks, new_mates, new_stale, piece_start, 
-                old_piece, enpassant_piece, clr, attempt_move.draw)
+                old_piece, enpassant_piece, clr, attempt_move.draw, game_over,
+                self.resign_list)
 
     def score_update(self, new_checks, new_mates, new_stale, piece_start,
-            old_piece, enpassant_piece, clr, draw, forward = True):
-        
+            old_piece, enpassant_piece, clr, draw, game_over, extra_resign,
+            forward = True):
+       
         bonus_score = 0
         if new_checks == 2:
             if piece_start.name == 'Queen':
@@ -356,11 +367,18 @@ class Board:
             if draw:
                 for clr_ in self.colours:
                     self.scores[clr_] = self.scores[clr_] + 10
+            elif game_over:
+                last_clr = next(iter(set(self.colours) - set(self.resign_list)))
+                self.scores[last_clr] += len(extra_resign)*20
         else:
             self.scores[clr] = self.scores[clr] - extra_score
             if draw:
                 for clr_ in self.colours:
                     self.scores[clr_] = self.scores[clr_] - 10
+            elif game_over:
+                for clr_ in self.colours:
+                    if clr_ not in extra_resign:
+                        self.scores[clr_] -= len(extra_resign)*20
 
     def half_move_update(self, attempt_move, piece_start, old_piece):
         if old_piece or piece_start.name == 'Pawn' or attempt_move.promoting:
@@ -953,8 +971,6 @@ class Board:
         queen_castle = [int(x) for x in fen_list[3].split(',')]
         scores = [int(x) for x in fen_list[4].split(',')]
 
-        self.half_moves = int(fen_list[5])
-
         for idx, clr in enumerate(COLOUR_INFO):
             if in_game[idx] == 1:
                 self.colours.append(clr)
@@ -962,6 +978,7 @@ class Board:
             self.queen_castle[clr] = queen_castle[idx]
             self.scores[clr] = scores[idx]
 
+        self.half_moves = [int(fen_list[5]), len(self.colours)]
         self.piece_fen_init(fen_list[6])
 
     def board_to_fen(self):
@@ -1115,9 +1132,19 @@ class Board:
             frwd = True
         else:
             frwd = False
-
+        
+        game_over = move.game_over
+        if game_over:
+            if direction == 1:
+                self.game_over = True
+            elif direction == -1:
+                self.game_over = False
+                for col__ in move.extra_resign:
+                    self.resign_list.append(col__)
+        
         self.score_update(new_checks, move.mating, move.stale, piece_start, 
-                old_piece, enpassant_piece, colour, move.draw, forward = frwd)
+                old_piece, enpassant_piece, colour, move.draw, game_over,
+                extra_resign = move.extra_resign, forward = frwd)
 
 #Creates class for a chess piece
 class Piece:
@@ -1263,6 +1290,8 @@ class Move:
         self.enpassant_cap = False
         self.resign = False
         self.draw = False
+        self.game_over = False
+        self.extra_resign = []
         self.mating = []
         self.stale = []
 
@@ -1296,7 +1325,6 @@ class Move:
 
         if self.promoting:
             start_string = self.start
-            print(piece_start.name)
             end_string = end_string + '=D'
 
         check_string = '+'*checks+'#'*len(self.mating)
